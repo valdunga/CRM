@@ -947,6 +947,134 @@ function periodLabel(key, periodo) {
   return key;
 }
 
+/* ------------------------------------------------------------
+   6b. COMPARACIÓN PERIOD-OVER-PERIOD (mes/trimestre/año anterior)
+   ------------------------------------------------------------ */
+
+// Dado un periodo ('mensual'|'trimestral'|'anual'), devuelve { actual, anterior }:
+// las claves de periodo correspondientes al periodo en curso y al inmediatamente anterior.
+function periodoActualYAnterior(periodo) {
+  const hoy = todayISO();
+  if (periodo === 'mensual') {
+    const actual = monthKey(hoy);
+    const [y, m] = actual.split('-').map(Number);
+    const prevM = m === 1 ? 12 : m - 1;
+    const prevY = m === 1 ? y - 1 : y;
+    return {
+      actual,
+      anterior: `${prevY}-${String(prevM).padStart(2, '0')}`
+    };
+  }
+  if (periodo === 'trimestral') {
+    const actual = quarterKey(hoy);
+    const [y, qStr] = actual.split('-T');
+    const q = parseInt(qStr, 10);
+    const prevQ = q === 1 ? 4 : q - 1;
+    const prevY = q === 1 ? parseInt(y, 10) - 1 : parseInt(y, 10);
+    return {
+      actual,
+      anterior: `${prevY}-T${prevQ}`
+    };
+  }
+  // anual
+  const actual = yearKey(hoy);
+  return {
+    actual,
+    anterior: String(parseInt(actual, 10) - 1)
+  };
+}
+
+// KPIs de un set de leads creados dentro de un periodo dado (filtra por fechaCreacion)
+function kpisDelPeriodo(leadsSet, periodKey, keyFn) {
+  const enPeriodo = leadsSet.filter(l => keyFn(l.fechaCreacion) === periodKey);
+  const total = enPeriodo.length;
+  const ganados = enPeriodo.filter(l => l.estado === ESTADOS.GANADO);
+  const tasaCierre = pct(ganados.length, total);
+  const ciclo = cicloVentaPromedio(enPeriodo);
+  return {
+    total,
+    ganados: ganados.length,
+    tasaCierre,
+    ciclo
+  };
+}
+
+// Compara KPIs entre el periodo actual y el anterior para un tipo de cliente.
+// Devuelve deltas listos para mostrar como flecha + magnitud.
+function compararPeriodos(leads, tipo, periodo) {
+  const keyFn = periodKeyFn(periodo);
+  const {
+    actual,
+    anterior
+  } = periodoActualYAnterior(periodo);
+  const set = leadsDeTipo(leads, tipo);
+  const kpiActual = kpisDelPeriodo(set, actual, keyFn);
+  const kpiAnterior = kpisDelPeriodo(set, anterior, keyFn);
+  const deltaLeads = kpiAnterior.total > 0 ? pct(kpiActual.total - kpiAnterior.total, kpiAnterior.total) : null;
+  const deltaTasaCierre = kpiActual.tasaCierre !== null && kpiAnterior.tasaCierre !== null ? kpiActual.tasaCierre - kpiAnterior.tasaCierre // en puntos porcentuales
+  : null;
+  const deltaCiclo = kpiActual.ciclo !== null && kpiAnterior.ciclo !== null ? kpiActual.ciclo - kpiAnterior.ciclo : null;
+  return {
+    actual: kpiActual,
+    anterior: kpiAnterior,
+    deltaLeads,
+    deltaTasaCierre,
+    deltaCiclo,
+    labelActual: periodLabel(actual, periodo),
+    labelAnterior: periodLabel(anterior, periodo)
+  };
+}
+
+/* ------------------------------------------------------------
+   6c. DESGLOSE POR CANAL (vertical) Y POR PRESTADOR
+   ------------------------------------------------------------ */
+
+// Agrupa leads de un tipo por su campo de origen (vertical, o vertical heredada
+// del prestador en B2B2C) y calcula leads totales, ganados, tasa de cierre y ciclo.
+function desglosePorVertical(leads, tipo) {
+  const set = leadsDeTipo(leads, tipo);
+  const campoVertical = tipo === 'B2B2C' ? 'verticalPrestador' : 'vertical';
+  const grupos = {};
+  set.forEach(l => {
+    const key = l[campoVertical] || '(sin vertical)';
+    if (!grupos[key]) grupos[key] = [];
+    grupos[key].push(l);
+  });
+  return Object.entries(grupos).map(([vertical, arr]) => {
+    const ganados = arr.filter(l => l.estado === ESTADOS.GANADO);
+    return {
+      vertical,
+      total: arr.length,
+      ganados: ganados.length,
+      tasaCierre: pct(ganados.length, arr.length),
+      ciclo: cicloVentaPromedio(arr)
+    };
+  }).sort((a, b) => (b.tasaCierre || 0) - (a.tasaCierre || 0));
+}
+
+// Solo aplica a B2B2C: desglose por prestador individual (no por su vertical).
+function desglosePorPrestador(leads, prestadores) {
+  const set = leadsDeTipo(leads, 'B2B2C');
+  const grupos = {};
+  set.forEach(l => {
+    const key = l.prestador || '(sin prestador)';
+    if (!grupos[key]) grupos[key] = [];
+    grupos[key].push(l);
+  });
+  return Object.entries(grupos).map(([prestador, arr]) => {
+    const ganados = arr.filter(l => l.estado === ESTADOS.GANADO);
+    const info = buscarPrestadorPorNombre(prestadores, prestador);
+    return {
+      prestador,
+      vertical: info ? info.vertical : arr[0].verticalPrestador || '—',
+      total: arr.length,
+      ganados: ganados.length,
+      tasaCierre: pct(ganados.length, arr.length),
+      ciclo: cicloVentaPromedio(arr)
+    };
+  }).sort((a, b) => (b.tasaCierre || 0) - (a.tasaCierre || 0));
+}
+
 /* ============================================================
    7. ICONOS (SVG inline, trazo simple coherente con el isotipo Skip)
    ============================================================ */
@@ -1270,6 +1398,75 @@ const Icon = {
     d: "M12 20h9"
   }), /*#__PURE__*/React.createElement("path", {
     d: "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"
+  })),
+  TrendUp: p => /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: p.size || 13,
+    height: p.size || 13,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2.4",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M4 17l6-6 4 4 6-8"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M14 7h6v6"
+  })),
+  TrendDown: p => /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: p.size || 13,
+    height: p.size || 13,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2.4",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M4 7l6 6 4-4 6 8"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M14 17h6v-6"
+  })),
+  Flat: p => /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: p.size || 13,
+    height: p.size || 13,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2.4",
+    strokeLinecap: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M4 12h16"
+  })),
+  Channel: p => /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: p.size || 18,
+    height: p.size || 18,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M4 6h16M4 12h10M4 18h13"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "20",
+    cy: "6",
+    r: "1.5",
+    fill: "currentColor",
+    stroke: "none"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "17",
+    cy: "12",
+    r: "1.5",
+    fill: "currentColor",
+    stroke: "none"
+  }), /*#__PURE__*/React.createElement("circle", {
+    cx: "20",
+    cy: "18",
+    r: "1.5",
+    fill: "currentColor",
+    stroke: "none"
   }))
 };
 
@@ -1280,7 +1477,8 @@ const Icon = {
 function Pill({
   children,
   tone = 'neutral',
-  size = 'md'
+  size = 'md',
+  style
 }) {
   const tones = {
     neutral: {
@@ -1321,7 +1519,8 @@ function Pill({
       padding: size === 'sm' ? '3px 9px' : '5px 12px',
       borderRadius: 'var(--r-pill)',
       whiteSpace: 'nowrap',
-      lineHeight: 1.3
+      lineHeight: 1.3,
+      ...style
     }
   }, children);
 }
@@ -1473,7 +1672,8 @@ function StatCard({
   value,
   sub,
   accent,
-  icon
+  icon,
+  delta
 }) {
   return /*#__PURE__*/React.createElement(Card, {
     style: {
@@ -1497,13 +1697,24 @@ function StatCard({
     }
   }, label), /*#__PURE__*/React.createElement("div", {
     style: {
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: 10,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
       fontSize: 30,
       fontWeight: 800,
       color: 'var(--ink-900)',
       fontFamily: 'var(--font-display)',
       letterSpacing: '-0.02em'
     }
-  }, value), sub && /*#__PURE__*/React.createElement("div", {
+  }, value), delta && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 2
+    }
+  }, delta)), sub && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12.5,
       color: 'var(--ink-500)',
@@ -1563,6 +1774,49 @@ function EmptyState({
       margin: '0 auto 18px'
     }
   }, desc), action);
+}
+
+// Indicador de variación: flecha + magnitud, coloreado según si subir es bueno o malo.
+// value: número (positivo = subió, negativo = bajó, null = sin dato comparable).
+// unit: 'pp' (puntos porcentuales, para tasas) | 'pct' (variación %, para conteos) | 'dias' (para ciclo de venta).
+// invert: true cuando un valor más alto es MALO (ej. ciclo de venta más largo es peor).
+function DeltaIndicator({
+  value,
+  unit = 'pct',
+  invert = false,
+  size = 'md'
+}) {
+  if (value === null || value === undefined || isNaN(value)) {
+    return /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: size === 'sm' ? 11.5 : 12.5,
+        color: 'var(--ink-300)',
+        fontWeight: 600
+      }
+    }, "Sin dato anterior");
+  }
+  const subio = value > 0.05;
+  const bajo = value < -0.05;
+  const esBueno = invert ? bajo : subio;
+  const esMalo = invert ? subio : bajo;
+  const color = esBueno ? 'var(--state-success)' : esMalo ? 'var(--state-danger)' : 'var(--ink-500)';
+  const Icono = subio ? Icon.TrendUp : bajo ? Icon.TrendDown : Icon.Flat;
+  const signo = value > 0 ? '+' : '';
+  const sufijo = unit === 'pp' ? 'pp' : unit === 'dias' ? ' días' : '%';
+  const magnitud = unit === 'dias' ? Math.round(value) : Math.abs(value) < 10 ? value.toFixed(1) : Math.round(value);
+  const texto = unit === 'dias' ? `${signo}${magnitud}${sufijo}` : `${signo}${magnitud}${sufijo}`;
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      fontSize: size === 'sm' ? 11.5 : 12.5,
+      fontWeight: 700,
+      color
+    }
+  }, /*#__PURE__*/React.createElement(Icono, {
+    size: size === 'sm' ? 11 : 13
+  }), texto);
 }
 
 /* ============================================================
@@ -1774,40 +2028,53 @@ function ComparativaTemporal({
   }, /*#__PURE__*/React.createElement(TipoPill, {
     tipo: tipo,
     size: "sm"
-  }))))), /*#__PURE__*/React.createElement("tbody", null, allKeys.map(key => /*#__PURE__*/React.createElement("tr", {
-    key: key
-  }, /*#__PURE__*/React.createElement("td", {
-    style: tdStyle
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontWeight: 700
-    }
-  }, periodLabel(key, periodo))), Object.values(TIPOS).map(tipo => {
-    const row = tablaPorTipo[tipo][key];
-    return /*#__PURE__*/React.createElement("td", {
-      key: tipo,
+  }))))), /*#__PURE__*/React.createElement("tbody", null, allKeys.map((key, idx) => {
+    const keyAnterior = idx > 0 ? allKeys[idx - 1] : null;
+    return /*#__PURE__*/React.createElement("tr", {
+      key: key
+    }, /*#__PURE__*/React.createElement("td", {
+      style: tdStyle
+    }, /*#__PURE__*/React.createElement("span", {
       style: {
-        ...tdStyle,
-        textAlign: 'center'
+        fontWeight: 700
       }
-    }, row ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontWeight: 800,
-        fontSize: 15,
-        color: TIPO_COLOR[tipo].text
-      }
-    }, fmtPct1(row.tasa)), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 11.5,
-        color: 'var(--ink-500)',
-        fontWeight: 600
-      }
-    }, row.ganados, "/", row.total, " cerrados")) : /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: 'var(--ink-300)'
-      }
-    }, "—"));
-  })))))));
+    }, periodLabel(key, periodo))), Object.values(TIPOS).map(tipo => {
+      const row = tablaPorTipo[tipo][key];
+      const rowAnterior = keyAnterior ? tablaPorTipo[tipo][keyAnterior] : null;
+      const delta = row && rowAnterior && row.tasa !== null && rowAnterior.tasa !== null ? row.tasa - rowAnterior.tasa : null;
+      return /*#__PURE__*/React.createElement("td", {
+        key: tipo,
+        style: {
+          ...tdStyle,
+          textAlign: 'center'
+        }
+      }, row ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontWeight: 800,
+          fontSize: 15,
+          color: TIPO_COLOR[tipo].text
+        }
+      }, fmtPct1(row.tasa)), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 11.5,
+          color: 'var(--ink-500)',
+          fontWeight: 600
+        }
+      }, row.ganados, "/", row.total, " cerrados"), keyAnterior && /*#__PURE__*/React.createElement("div", {
+        style: {
+          marginTop: 4
+        }
+      }, /*#__PURE__*/React.createElement(DeltaIndicator, {
+        value: delta,
+        unit: "pp",
+        size: "sm"
+      }))) : /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: 'var(--ink-300)'
+        }
+      }, "—"));
+    }));
+  })))));
 }
 const thStyle = {
   textAlign: 'left',
@@ -1833,6 +2100,7 @@ function Dashboard({
   onGoTipo,
   onNuevoLead
 }) {
+  const [periodoComparacion, setPeriodoComparacion] = useState('mensual');
   const totales = useMemo(() => {
     const out = {};
     Object.values(TIPOS).forEach(tipo => {
@@ -1849,8 +2117,20 @@ function Dashboard({
     });
     return out;
   }, [leads]);
+  const comparativas = useMemo(() => {
+    const out = {};
+    Object.values(TIPOS).forEach(tipo => {
+      out[tipo] = compararPeriodos(leads, tipo, periodoComparacion);
+    });
+    return out;
+  }, [leads, periodoComparacion]);
   const totalGeneral = leads.length;
   const ganadosGeneral = leads.filter(l => l.estado === ESTADOS.GANADO).length;
+  const periodoLabelCorto = {
+    mensual: 'mes anterior',
+    trimestral: 'trimestre anterior',
+    anual: 'año anterior'
+  }[periodoComparacion];
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -1877,8 +2157,38 @@ function Dashboard({
   }, "Nuevo lead")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 12,
+      flexWrap: 'wrap',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12.5,
+      fontWeight: 700,
+      color: 'var(--ink-500)',
+      textTransform: 'uppercase',
+      letterSpacing: '0.03em'
+    }
+  }, "Variación vs. ", periodoLabelCorto), /*#__PURE__*/React.createElement(SegmentedControl, {
+    value: periodoComparacion,
+    onChange: setPeriodoComparacion,
+    options: [{
+      value: 'mensual',
+      label: 'Mensual'
+    }, {
+      value: 'trimestral',
+      label: 'Trimestral'
+    }, {
+      value: 'anual',
+      label: 'Anual'
+    }]
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
       gap: 16,
-      marginBottom: 24,
+      marginBottom: 16,
       flexWrap: 'wrap'
     }
   }, Object.values(TIPOS).map(tipo => /*#__PURE__*/React.createElement(StatCard, {
@@ -1889,6 +2199,10 @@ function Dashboard({
     accent: TIPO_COLOR[tipo].accentSoft,
     icon: /*#__PURE__*/React.createElement(Icon.Bolt, {
       size: 18
+    }),
+    delta: /*#__PURE__*/React.createElement(DeltaIndicator, {
+      value: comparativas[tipo].deltaTasaCierre,
+      unit: "pp"
     })
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1905,6 +2219,31 @@ function Dashboard({
     accent: TIPO_COLOR[tipo].accentSoft,
     icon: /*#__PURE__*/React.createElement(Icon.Calendar, {
       size: 16
+    }),
+    delta: /*#__PURE__*/React.createElement(DeltaIndicator, {
+      value: comparativas[tipo].deltaCiclo,
+      unit: "dias",
+      invert: true
+    })
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 16,
+      marginBottom: 24,
+      flexWrap: 'wrap'
+    }
+  }, Object.values(TIPOS).map(tipo => /*#__PURE__*/React.createElement(StatCard, {
+    key: tipo + '_leads',
+    label: `Leads creados · ${tipo}`,
+    value: String(comparativas[tipo].actual.total),
+    sub: `En este periodo (${comparativas[tipo].labelActual})`,
+    accent: TIPO_COLOR[tipo].accentSoft,
+    icon: /*#__PURE__*/React.createElement(Icon.Leads, {
+      size: 16
+    }),
+    delta: /*#__PURE__*/React.createElement(DeltaIndicator, {
+      value: comparativas[tipo].deltaLeads,
+      unit: "pct"
     })
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3844,6 +4183,10 @@ function Sidebar({
     label: 'Prestadores',
     icon: Icon.Building
   }, {
+    id: 'canales',
+    label: 'Canales',
+    icon: Icon.Channel
+  }, {
     id: 'upload',
     label: 'Carga masiva',
     icon: Icon.Upload
@@ -4100,7 +4443,185 @@ function ComparativaView({
 }
 
 /* ============================================================
-   23. APP — shell principal, estado global, routing
+   23. VISTA CANALES — ¿desde qué vertical/prestador convierto mejor?
+   Responde la pregunta de inversión por canal que no estaba cubierta
+   en el resto del CRM (que solo compara por tipo de cliente).
+   ============================================================ */
+
+function TablaCanal({
+  filas,
+  columnaPrincipal,
+  labelColumnaPrincipal,
+  mostrarVertical
+}) {
+  const [orden, setOrden] = useState('tasaCierre');
+  const [dir, setDir] = useState('desc');
+  const ordenadas = useMemo(() => {
+    const copia = [...filas];
+    copia.sort((a, b) => {
+      const va = a[orden] === null || a[orden] === undefined ? -1 : a[orden];
+      const vb = b[orden] === null || b[orden] === undefined ? -1 : b[orden];
+      return dir === 'desc' ? vb - va : va - vb;
+    });
+    return copia;
+  }, [filas, orden, dir]);
+  const cambiarOrden = campo => {
+    if (orden === campo) setDir(d => d === 'desc' ? 'asc' : 'desc');else {
+      setOrden(campo);
+      setDir('desc');
+    }
+  };
+  const thSort = (campo, label) => /*#__PURE__*/React.createElement("th", {
+    style: {
+      ...thStyle,
+      cursor: 'pointer'
+    },
+    onClick: () => cambiarOrden(campo)
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4
+    }
+  }, label, orden === campo && /*#__PURE__*/React.createElement(Icon.Chevron, {
+    size: 11,
+    open: dir === 'asc'
+  })));
+  if (filas.length === 0) {
+    return /*#__PURE__*/React.createElement(EmptyState, {
+      title: "Sin datos todavía",
+      desc: "Crea o carga leads para ver el desempeño por canal."
+    });
+  }
+  const mejor = ordenadas[0];
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      borderCollapse: 'collapse',
+      fontSize: 13.5,
+      minWidth: 560
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, thSort(columnaPrincipal, labelColumnaPrincipal), mostrarVertical && /*#__PURE__*/React.createElement("th", {
+    style: thStyle
+  }, "Vertical"), thSort('total', 'Leads'), thSort('ganados', 'Ganados'), thSort('tasaCierre', 'Tasa de cierre'), thSort('ciclo', 'Ciclo de venta'))), /*#__PURE__*/React.createElement("tbody", null, ordenadas.map((f, i) => /*#__PURE__*/React.createElement("tr", {
+    key: f[columnaPrincipal] + i
+  }, /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700
+    }
+  }, f[columnaPrincipal]), f === mejor && f.tasaCierre !== null && /*#__PURE__*/React.createElement(Pill, {
+    tone: "success",
+    size: "sm",
+    style: {
+      marginLeft: 8
+    }
+  }, "Mejor")), mostrarVertical && /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, /*#__PURE__*/React.createElement(Pill, {
+    tone: "warning",
+    size: "sm"
+  }, f.vertical)), /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, f.total), /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, f.ganados), /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 800,
+      color: 'var(--skip-morado)'
+    }
+  }, fmtPct1(f.tasaCierre))), /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, f.ciclo !== null ? `${Math.round(f.ciclo)} días` : '—'))))));
+}
+function CanalesView({
+  leads,
+  prestadores
+}) {
+  const [tipoSel, setTipoSel] = useState('B2B');
+  const filasVertical = useMemo(() => desglosePorVertical(leads, tipoSel), [leads, tipoSel]);
+  const filasPrestador = useMemo(() => desglosePorPrestador(leads, prestadores), [leads, prestadores]);
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 22
+    }
+  }, /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontSize: 23
+    }
+  }, "Canales"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: 'var(--ink-500)',
+      margin: '6px 0 0',
+      fontWeight: 500
+    }
+  }, "¿Desde qué vertical o prestador estás convirtiendo mejor? Ordena cada columna para comparar.")), /*#__PURE__*/React.createElement(Card, {
+    style: {
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Tipo de cliente"
+  }, /*#__PURE__*/React.createElement(SegmentedControl, {
+    value: tipoSel,
+    onChange: setTipoSel,
+    options: Object.values(TIPOS).map(t => ({
+      value: t,
+      label: t
+    }))
+  })), /*#__PURE__*/React.createElement("h3", {
+    style: {
+      fontSize: 15.5,
+      marginBottom: 4,
+      marginTop: 18
+    }
+  }, "Por vertical ", tipoSel === 'B2B2C' && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 500,
+      fontSize: 13,
+      color: 'var(--ink-500)'
+    }
+  }, "(heredada del prestador)")), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 12.5,
+      color: 'var(--ink-500)',
+      marginTop: 0,
+      marginBottom: 14
+    }
+  }, tipoSel === 'B2B2C' ? 'Agrupa todos los prestadores que comparten la misma vertical de origen.' : 'Compara el desempeño de cada canal de adquisición.'), /*#__PURE__*/React.createElement(TablaCanal, {
+    filas: filasVertical,
+    columnaPrincipal: "vertical",
+    labelColumnaPrincipal: "Vertical",
+    mostrarVertical: false
+  })), tipoSel === 'B2B2C' && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("h3", {
+    style: {
+      fontSize: 15.5,
+      marginBottom: 4
+    }
+  }, "Por prestador individual"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 12.5,
+      color: 'var(--ink-500)',
+      marginTop: 0,
+      marginBottom: 14
+    }
+  }, "Útil para detectar si, dentro de la misma vertical, hay prestadores que convierten distinto entre sí."), /*#__PURE__*/React.createElement(TablaCanal, {
+    filas: filasPrestador,
+    columnaPrincipal: "prestador",
+    labelColumnaPrincipal: "Prestador",
+    mostrarVertical: true
+  })));
+}
+
+/* ============================================================
+   24. APP — shell principal, estado global, routing
    ============================================================ */
 
 function App() {
@@ -4265,6 +4786,9 @@ function App() {
     onAdd: handleAddPrestador,
     onUpdate: handleUpdatePrestador,
     onDelete: handleDeletePrestador
+  }), view === 'canales' && /*#__PURE__*/React.createElement(CanalesView, {
+    leads: leads,
+    prestadores: prestadores
   }), view === 'upload' && /*#__PURE__*/React.createElement(UploadMasivoView, {
     leads: leads,
     prestadores: prestadores,
