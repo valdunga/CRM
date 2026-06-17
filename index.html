@@ -1,0 +1,1698 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skip CRM · Seguimiento de ventas</title>
+<meta name="description" content="CRM interno de Skip para seguimiento de leads B2B, B2B2C y B2C.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2222%22 fill=%22%232D0949%22/><text x=%2250%22 y=%2268%22 font-size=%2255%22 text-anchor=%22middle%22 fill=%22%23EBB1CC%22 font-family=%22Arial%22 font-weight=%22900%22>S</text></svg>">
+
+<style>
+/* ============================================================
+   SKIP CRM — Design tokens derivados del Manual de Marca Skip
+   Morado #2D0949 · Amarillo #EFED94 · Rosa #EBB1CC
+   Cyan #50B1C2 · Gris #EBE1E4 · Tipografía Gilroy (fallback system)
+   ============================================================ */
+
+@font-face {
+  font-family: 'Gilroy';
+  src: local('Gilroy');
+}
+
+:root {
+  /* Marca */
+  --skip-morado: #2D0949;
+  --skip-morado-soft: #43136B;
+  --skip-morado-deep: #1C0530;
+  --skip-amarillo: #EFED94;
+  --skip-rosa: #EBB1CC;
+  --skip-cyan: #50B1C2;
+  --skip-gris: #EBE1E4;
+
+  /* Superficies */
+  --bg-app: #FAF7F8;
+  --bg-canvas: #FFFFFF;
+  --bg-sunken: var(--skip-gris);
+  --bg-dark: var(--skip-morado);
+  --bg-dark-soft: var(--skip-morado-soft);
+
+  /* Texto */
+  --ink-900: #1C0530;
+  --ink-700: #4A3A57;
+  --ink-500: #7A6B85;
+  --ink-300: #B3A6BC;
+  --ink-on-dark: #F4EFF6;
+  --ink-on-dark-soft: #C9B8D4;
+
+  /* Bordes */
+  --border-soft: #E8DEE6;
+  --border-strong: #D2C3DA;
+
+  /* Estado / semántica (derivados de la paleta, no colores genéricos) */
+  --state-success: #3D8F6B;
+  --state-success-bg: #E3F2EA;
+  --state-warning: #C28A2E;
+  --state-warning-bg: #FBF0DD;
+  --state-danger: #BD4B5E;
+  --state-danger-bg: #FAE5E9;
+  --state-info: var(--skip-cyan);
+  --state-info-bg: #E5F4F7;
+
+  /* Tipografía */
+  --font-display: 'Gilroy', 'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-body: 'Gilroy', 'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', 'Roboto Mono', monospace;
+
+  /* Radios y sombras — esquinas redondeadas como el isotipo Skip */
+  --r-sm: 8px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  --shadow-sm: 0 1px 2px rgba(45,9,73,0.06);
+  --shadow-md: 0 4px 16px rgba(45,9,73,0.10);
+  --shadow-lg: 0 12px 32px rgba(45,9,73,0.16);
+  --shadow-dark: 0 8px 24px rgba(28,5,48,0.35);
+
+  --transition: 180ms cubic-bezier(.4,0,.2,1);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-app);
+  color: var(--ink-900);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.45;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--ink-900);
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+a { color: inherit; }
+
+::selection { background: var(--skip-rosa); color: var(--skip-morado); }
+
+/* Scrollbars discretas */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--r-pill); }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-300); }
+
+:focus-visible {
+  outline: 2px solid var(--skip-cyan);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+#root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+/* ============================================================
+   1. MODELO DE NEGOCIO — constantes de Skip
+   ============================================================ */
+
+const TIPOS = {
+  B2B: 'B2B',
+  B2B2C: 'B2B2C',
+  B2C: 'B2C',
+};
+
+const TIPO_LABEL = {
+  B2B: 'B2B · Prestadores',
+  B2B2C: 'B2B2C · Pacientes vía prestador',
+  B2C: 'B2C · Directo',
+};
+
+const TIPO_DESC = {
+  B2B: 'Prestador médico que se integra a Skip para ofrecer rendición automática o Atiéndete Ahora, Paga Después a sus pacientes.',
+  B2B2C: 'Paciente de un prestador adherido que, tras usar el servicio, decide contratar un plan Skip.',
+  B2C: 'Persona que contrata un plan Skip de forma directa, sin pasar por un prestador.',
+};
+
+// Verticales (origen) por tipo de cliente
+const VERTICALES = {
+  B2B: ['Cold emails', 'Eventos', 'Hunting', 'Referral', 'Paid Media'],
+  B2B2C: ['Cold emails', 'Eventos', 'Hunting', 'Referral', 'Paid Media'], // origen del PRESTADOR
+  B2C: ['Organic', 'Paid Media', 'Newsletter', 'Cold email'],
+};
+
+// Etapas de funnel por tipo (orden = orden del funnel)
+const ETAPAS = {
+  B2B: ['Nuevo contacto', 'Reunión 1', 'Reunión Técnica', 'Integración Exitosa'],
+  B2B2C: ['Formulario Onboarding', 'Esquema asegurador', 'Medio de pago'],
+  B2C: ['Formulario Onboarding', 'Esquema asegurador', 'Medio de pago'],
+};
+
+// Etapa que representa el cierre (ganado) para cada tipo
+const ETAPA_CIERRE = {
+  B2B: 'Integración Exitosa',
+  B2B2C: 'Medio de pago',
+  B2C: 'Medio de pago',
+};
+
+// Pares de etapas consecutivas para las que se reportan tasas de conversión
+// (definidos explícitamente según el brief, en vez de inferir todos los pares)
+const PARES_CONVERSION = {
+  B2B: [
+    ['Nuevo contacto', 'Reunión 1'],
+    ['Reunión 1', 'Integración Exitosa'],
+  ],
+  B2B2C: [
+    ['Formulario Onboarding', 'Esquema asegurador'],
+    ['Esquema asegurador', 'Medio de pago'],
+  ],
+  B2C: [
+    ['Formulario Onboarding', 'Esquema asegurador'],
+    ['Esquema asegurador', 'Medio de pago'],
+  ],
+};
+
+const ESTADOS = {
+  ABIERTO: 'Abierto',
+  GANADO: 'Ganado',
+  PERDIDO: 'Perdido',
+};
+
+// Colores de acento por tipo de cliente (derivados de la paleta de marca)
+const TIPO_COLOR = {
+  B2B: { accent: 'var(--skip-morado)', accentSoft: '#EDE3F2', text: 'var(--skip-morado)' },
+  B2B2C: { accent: '#B8456F', accentSoft: 'var(--skip-rosa)', text: '#8A2F52' },
+  B2C: { accent: '#2C8A9B', accentSoft: '#DCF0F3', text: '#1E6B79' },
+};
+
+const MOTIVOS_PERDIDA = [
+  'Precio / fee',
+  'Eligió competencia',
+  'Sin respuesta / se enfrió',
+  'No cumple requisitos (isapre/prestador)',
+  'Timing no es ahora',
+  'Otro',
+];
+
+/* ============================================================
+   2. UTILIDADES DE FECHA Y FORMATO
+   ============================================================ */
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function parseISO(d) {
+  if (!d) return null;
+  const dt = new Date(d + 'T00:00:00');
+  return isNaN(dt.getTime()) ? null : dt;
+}
+
+function diffDays(isoStart, isoEnd) {
+  const a = parseISO(isoStart);
+  const b = parseISO(isoEnd);
+  if (!a || !b) return null;
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  const d = parseISO(iso);
+  if (!d) return '—';
+  return d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatDateShort(iso) {
+  if (!iso) return '—';
+  const d = parseISO(iso);
+  if (!d) return '—';
+  return d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
+}
+
+function monthKey(iso) {
+  return iso ? iso.slice(0, 7) : null; // YYYY-MM
+}
+
+function quarterKey(iso) {
+  if (!iso) return null;
+  const [y, m] = iso.split('-');
+  const q = Math.ceil(parseInt(m, 10) / 3);
+  return `${y}-T${q}`;
+}
+
+function yearKey(iso) {
+  return iso ? iso.slice(0, 4) : null;
+}
+
+function monthLabel(key) {
+  if (!key) return '';
+  const [y, m] = key.split('-');
+  const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  return `${meses[parseInt(m,10)-1]} ${y}`;
+}
+
+function uid() {
+  return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function pct(num, den) {
+  if (!den) return null;
+  return (num / den) * 100;
+}
+
+function fmtPct(v) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  return v.toFixed(0) + '%';
+}
+
+function fmtPct1(v) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  return v.toFixed(1) + '%';
+}
+
+/* ============================================================
+   3. PERSISTENCIA — localStorage
+   ============================================================ */
+
+const STORAGE_KEY = 'skip_crm_data_v1';
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.leads)) return null;
+    return parsed;
+  } catch (e) {
+    console.error('Error leyendo localStorage', e);
+    return null;
+  }
+}
+
+function saveData(data) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    return true;
+  } catch (e) {
+    console.error('Error guardando en localStorage', e);
+    return false;
+  }
+}
+
+/* ============================================================
+   4. LÓGICA DE LEAD — historial de etapas
+   ============================================================ */
+
+function alcanzoEtapa(lead, etapaNombre) {
+  const etapas = ETAPAS[lead.tipo];
+  const idx = etapas.indexOf(etapaNombre);
+  if (idx === -1) return false;
+  if (lead.estado === ESTADOS.GANADO) return true;
+  return lead.etapaIndex >= idx;
+}
+
+function fechaEnEtapa(lead, etapaNombre) {
+  return (lead.stageDates && lead.stageDates[etapaNombre]) || null;
+}
+
+/* ============================================================
+   5. SEED DATA — datos de ejemplo para que el piloto no parta vacío
+   ============================================================ */
+
+function buildSeed() {
+  const leads = [];
+  const push = (l) => leads.push({ id: uid(), estado: ESTADOS.ABIERTO, motivoPerdida: null, notas: '', ...l });
+
+  push({
+    tipo: 'B2B', empresa: 'Clínica Vespucio', contacto: 'Marcela Reyes', email: 'mreyes@vespucio.cl',
+    vertical: 'Referral', fechaCreacion: '2026-02-03', etapaIndex: 3, estado: ESTADOS.GANADO,
+    fechaCierre: '2026-03-28',
+    stageDates: { 'Nuevo contacto': '2026-02-03', 'Reunión 1': '2026-02-10', 'Reunión Técnica': '2026-03-02', 'Integración Exitosa': '2026-03-28' },
+  });
+  push({
+    tipo: 'B2B', empresa: 'Centro Médico Andes', contacto: 'Rodrigo Paz', email: 'rpaz@cmandes.cl',
+    vertical: 'Cold emails', fechaCreacion: '2026-03-12', etapaIndex: 1, estado: ESTADOS.ABIERTO, fechaCierre: null,
+    stageDates: { 'Nuevo contacto': '2026-03-12', 'Reunión 1': '2026-03-20' },
+  });
+  push({
+    tipo: 'B2B', empresa: 'Red Salud Maipú', contacto: 'Daniela Soto', email: 'dsoto@redsalud.cl',
+    vertical: 'Hunting', fechaCreacion: '2026-04-01', etapaIndex: 2, estado: ESTADOS.ABIERTO, fechaCierre: null,
+    stageDates: { 'Nuevo contacto': '2026-04-01', 'Reunión 1': '2026-04-08', 'Reunión Técnica': '2026-04-22' },
+  });
+  push({
+    tipo: 'B2B', empresa: 'Clínica del Mar', contacto: 'Ignacio Vidal', email: 'ivvidal@clinicamar.cl',
+    vertical: 'Eventos', fechaCreacion: '2026-01-15', etapaIndex: 0, estado: ESTADOS.PERDIDO, fechaCierre: '2026-02-10',
+    motivoPerdida: 'Sin respuesta / se enfrió',
+    stageDates: { 'Nuevo contacto': '2026-01-15' },
+  });
+  push({
+    tipo: 'B2B', empresa: 'Dental Sonrisa', contacto: 'Paula Mena', email: 'pmena@dentalsonrisa.cl',
+    vertical: 'Paid Media', fechaCreacion: '2026-05-02', etapaIndex: 0, estado: ESTADOS.ABIERTO, fechaCierre: null,
+    stageDates: { 'Nuevo contacto': '2026-05-02' },
+  });
+
+  push({
+    tipo: 'B2B2C', nombre: 'Francisca Lagos', email: 'flagos@gmail.com', celular: '+56 9 8123 4455',
+    prestador: 'Clínica Vespucio', verticalPrestador: 'Referral',
+    fechaCreacion: '2026-04-05', etapaIndex: 2, estado: ESTADOS.GANADO, fechaCierre: '2026-04-09',
+    stageDates: { 'Formulario Onboarding': '2026-04-05', 'Esquema asegurador': '2026-04-06', 'Medio de pago': '2026-04-09' },
+  });
+  push({
+    tipo: 'B2B2C', nombre: 'Tomás Aravena', email: 'tomas.aravena@hotmail.com', celular: '+56 9 7765 2210',
+    prestador: 'Clínica Vespucio', verticalPrestador: 'Referral',
+    fechaCreacion: '2026-05-10', etapaIndex: 1, estado: ESTADOS.ABIERTO, fechaCierre: null,
+    stageDates: { 'Formulario Onboarding': '2026-05-10', 'Esquema asegurador': '2026-05-12' },
+  });
+  push({
+    tipo: 'B2B2C', nombre: 'Camila Rojas', email: 'camirojas@gmail.com', celular: '+56 9 6543 1188',
+    prestador: 'Red Salud Maipú', verticalPrestador: 'Hunting',
+    fechaCreacion: '2026-05-20', etapaIndex: 0, estado: ESTADOS.ABIERTO, fechaCierre: null,
+    stageDates: { 'Formulario Onboarding': '2026-05-20' },
+  });
+
+  push({
+    tipo: 'B2C', nombre: 'Matías Contreras', email: 'mati.contreras@gmail.com', celular: '+56 9 5512 7733',
+    vertical: 'Organic', fechaCreacion: '2026-03-01', etapaIndex: 2, estado: ESTADOS.GANADO, fechaCierre: '2026-03-04',
+    stageDates: { 'Formulario Onboarding': '2026-03-01', 'Esquema asegurador': '2026-03-02', 'Medio de pago': '2026-03-04' },
+  });
+  push({
+    tipo: 'B2C', nombre: 'Valentina Soto', email: 'valesoto88@gmail.com', celular: '+56 9 4421 9087',
+    vertical: 'Newsletter', fechaCreacion: '2026-04-18', etapaIndex: 1, estado: ESTADOS.ABIERTO, fechaCierre: null,
+    stageDates: { 'Formulario Onboarding': '2026-04-18', 'Esquema asegurador': '2026-04-19' },
+  });
+  push({
+    tipo: 'B2C', nombre: 'Joaquín Pizarro', email: 'jpizarro@gmail.com', celular: '+56 9 3398 5521',
+    vertical: 'Paid Media', fechaCreacion: '2026-05-25', etapaIndex: 0, estado: ESTADOS.ABIERTO, fechaCierre: null,
+    stageDates: { 'Formulario Onboarding': '2026-05-25' },
+  });
+  push({
+    tipo: 'B2C', nombre: 'Antonia Bravo', email: 'antonia.bravo@gmail.com', celular: '+56 9 2287 6610',
+    vertical: 'Cold email', fechaCreacion: '2026-02-20', etapaIndex: 0, estado: ESTADOS.PERDIDO, fechaCierre: '2026-03-10',
+    motivoPerdida: 'Timing no es ahora',
+    stageDates: { 'Formulario Onboarding': '2026-02-20' },
+  });
+
+  return { leads, version: 1 };
+}
+
+/* ============================================================
+   6. MOTOR DE MÉTRICAS
+   ============================================================ */
+
+// Filtra leads por periodo según una key (mes/trimestre/año) aplicada
+// sobre fechaCreacion (para conteos de generación) — se documenta cada uso.
+function leadsDeTipo(leads, tipo) {
+  return leads.filter(l => l.tipo === tipo);
+}
+
+// Tasa de conversión entre un par de etapas consecutivas, sobre un set de leads dado.
+// Numerador: leads que alcanzaron etapaB (o están más adelante, o ganaron).
+// Denominador: leads que alcanzaron etapaA.
+function tasaConversion(leadsSet, tipo, etapaA, etapaB) {
+  const etapas = ETAPAS[tipo];
+  const idxA = etapas.indexOf(etapaA);
+  const idxB = etapas.indexOf(etapaB);
+  const base = leadsSet.filter(l => l.tipo === tipo && alcanzoEtapa(l, etapaA));
+  const avanzaron = base.filter(l => alcanzoEtapa(l, etapaB));
+  return {
+    num: avanzaron.length,
+    den: base.length,
+    tasa: pct(avanzaron.length, base.length),
+  };
+}
+
+// Ciclo de venta promedio (días) para leads GANADOS dentro de un set
+function cicloVentaPromedio(leadsSet) {
+  const ganados = leadsSet.filter(l => l.estado === ESTADOS.GANADO && l.fechaCierre);
+  if (ganados.length === 0) return null;
+  const dias = ganados.map(l => diffDays(l.fechaCreacion, l.fechaCierre)).filter(d => d !== null);
+  if (dias.length === 0) return null;
+  return dias.reduce((a, b) => a + b, 0) / dias.length;
+}
+
+function tasaCierreGlobal(leadsSet, tipo) {
+  const set = leadsSet.filter(l => l.tipo === tipo);
+  const total = set.length;
+  const ganados = set.filter(l => l.estado === ESTADOS.GANADO).length;
+  return { num: ganados, den: total, tasa: pct(ganados, total) };
+}
+
+// Construye filas de funnel completas (todas las etapas) con conteos absolutos
+function funnelCounts(leadsSet, tipo) {
+  const etapas = ETAPAS[tipo];
+  return etapas.map(etapa => ({
+    etapa,
+    count: leadsSet.filter(l => l.tipo === tipo && alcanzoEtapa(l, etapa)).length,
+  }));
+}
+
+// Agrupa leads por periodo (mes/trimestre/año) usando una función de key sobre una fecha dada
+function agruparPorPeriodo(leadsSet, keyFn, fechaField) {
+  const groups = {};
+  leadsSet.forEach(l => {
+    const fecha = l[fechaField];
+    const key = keyFn(fecha);
+    if (!key) return;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(l);
+  });
+  return groups;
+}
+
+function periodKeyFn(periodo) {
+  if (periodo === 'mensual') return monthKey;
+  if (periodo === 'trimestral') return quarterKey;
+  return yearKey;
+}
+
+function sortPeriodKeys(keys, periodo) {
+  return keys.sort((a, b) => {
+    if (periodo === 'trimestral') {
+      const [ya, qa] = a.split('-T'); const [yb, qb] = b.split('-T');
+      return ya === yb ? qa - qb : ya - yb;
+    }
+    return a.localeCompare(b);
+  });
+}
+
+function periodLabel(key, periodo) {
+  if (periodo === 'mensual') return monthLabel(key);
+  if (periodo === 'trimestral') return key.replace('-', ' ');
+  return key;
+}
+
+/* ============================================================
+   7. ICONOS (SVG inline, trazo simple coherente con el isotipo Skip)
+   ============================================================ */
+
+const Icon = {
+  Dashboard: (p) => <svg viewBox="0 0 24 24" width={p.size||18} height={p.size||18} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>,
+  Leads: (p) => <svg viewBox="0 0 24 24" width={p.size||18} height={p.size||18} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c0-3.5 2.6-6 5.5-6s5.5 2.5 5.5 6"/><circle cx="18" cy="8" r="2.4"/><path d="M15.8 14.3c2.4.3 4.2 2.4 4.2 5.2"/></svg>,
+  Funnel: (p) => <svg viewBox="0 0 24 24" width={p.size||18} height={p.size||18} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16l-6 8v6l-4 2v-8z"/></svg>,
+  Compare: (p) => <svg viewBox="0 0 24 24" width={p.size||18} height={p.size||18} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17V7M7 7l-3 3M7 7l3 3"/><path d="M17 7v10M17 17l3-3M17 17l-3-3"/></svg>,
+  Plus: (p) => <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+  Search: (p) => <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>,
+  Close: (p) => <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>,
+  Chevron: (p) => <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{transform: p.open ? 'rotate(90deg)' : 'rotate(0deg)', transition:'transform 160ms'}}><path d="M9 6l6 6-6 6"/></svg>,
+  Trash: (p) => <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-1 13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1L6 7"/></svg>,
+  Check: (p) => <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>,
+  Calendar: (p) => <svg viewBox="0 0 24 24" width={p.size||14} height={p.size||14} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg>,
+  Export: (p) => <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>,
+  Import: (p) => <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 15V3m0 12-4-4m4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>,
+  Sun: (p) => <svg viewBox="0 0 24 24" width={p.size||44} height={p.size||44} fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="12" cy="12" r="9" opacity="0.15" fill="currentColor" stroke="none"/><path d="M12 8v8M8 12h8" strokeLinecap="round"/></svg>,
+  Bolt: (p) => <svg viewBox="0 0 24 24" width={p.size||18} height={p.size||18} fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>,
+  ArrowRight: (p) => <svg viewBox="0 0 24 24" width={p.size||14} height={p.size||14} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>,
+  Building: (p) => <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 8h.01M15 8h.01M9 12h.01M15 12h.01M9 16h.01M15 16h.01"/></svg>,
+  User: (p) => <svg viewBox="0 0 24 24" width={p.size||16} height={p.size||16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.6 3.4-6 8-6s8 2.4 8 6"/></svg>,
+};
+
+/* ============================================================
+   8. COMPONENTES BASE
+   ============================================================ */
+
+function Pill({ children, tone = 'neutral', size = 'md' }) {
+  const tones = {
+    neutral: { bg: 'var(--bg-sunken)', color: 'var(--ink-700)' },
+    success: { bg: 'var(--state-success-bg)', color: 'var(--state-success)' },
+    warning: { bg: 'var(--state-warning-bg)', color: 'var(--state-warning)' },
+    danger: { bg: 'var(--state-danger-bg)', color: 'var(--state-danger)' },
+    info: { bg: 'var(--state-info-bg)', color: '#1E6B79' },
+    morado: { bg: '#EDE3F2', color: 'var(--skip-morado)' },
+  };
+  const t = tones[tone] || tones.neutral;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      background: t.bg, color: t.color,
+      fontWeight: 700, fontSize: size === 'sm' ? 11 : 12.5,
+      padding: size === 'sm' ? '3px 9px' : '5px 12px',
+      borderRadius: 'var(--r-pill)', whiteSpace: 'nowrap', lineHeight: 1.3,
+    }}>{children}</span>
+  );
+}
+
+function EstadoPill({ estado, size }) {
+  if (estado === ESTADOS.GANADO) return <Pill tone="success" size={size}>Ganado</Pill>;
+  if (estado === ESTADOS.PERDIDO) return <Pill tone="danger" size={size}>Perdido</Pill>;
+  return <Pill tone="info" size={size}>Abierto</Pill>;
+}
+
+function TipoPill({ tipo, size }) {
+  const tones = { B2B: 'morado', B2B2C: 'warning', B2C: 'info' };
+  return <Pill tone={tones[tipo]} size={size}>{tipo}</Pill>;
+}
+
+function Btn({ children, onClick, variant = 'primary', size = 'md', icon, type = 'button', disabled, style }) {
+  const base = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+    fontWeight: 700, border: 'none', borderRadius: 'var(--r-md)',
+    transition: `all var(--transition)`, fontFamily: 'var(--font-body)',
+    fontSize: size === 'sm' ? 13 : 14.5,
+    padding: size === 'sm' ? '8px 14px' : '11px 18px',
+    opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto',
+  };
+  const variants = {
+    primary: { background: 'var(--skip-morado)', color: '#fff', boxShadow: 'var(--shadow-sm)' },
+    secondary: { background: 'var(--bg-canvas)', color: 'var(--skip-morado)', border: '1.5px solid var(--border-strong)' },
+    ghost: { background: 'transparent', color: 'var(--ink-700)' },
+    danger: { background: 'var(--state-danger-bg)', color: 'var(--state-danger)' },
+    cyan: { background: 'var(--skip-cyan)', color: '#fff' },
+  };
+  return (
+    <button type={type} disabled={disabled} onClick={onClick} style={{ ...base, ...variants[variant], ...style }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.filter = 'brightness(0.96)'; }}
+      onMouseLeave={e => { e.currentTarget.style.filter = 'none'; }}
+    >
+      {icon}{children}
+    </button>
+  );
+}
+
+function Card({ children, style, pad = 22 }) {
+  return (
+    <div style={{
+      background: 'var(--bg-canvas)', borderRadius: 'var(--r-lg)',
+      border: '1px solid var(--border-soft)', boxShadow: 'var(--shadow-sm)',
+      padding: pad, ...style,
+    }}>{children}</div>
+  );
+}
+
+function SegmentedControl({ options, value, onChange }) {
+  return (
+    <div style={{ display: 'inline-flex', background: 'var(--bg-sunken)', borderRadius: 'var(--r-pill)', padding: 4, gap: 2 }}>
+      {options.map(opt => (
+        <button key={opt.value} onClick={() => onChange(opt.value)} style={{
+          border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)',
+          padding: '7px 16px', borderRadius: 'var(--r-pill)', fontWeight: 700, fontSize: 13.5,
+          background: value === opt.value ? 'var(--skip-morado)' : 'transparent',
+          color: value === opt.value ? '#fff' : 'var(--ink-700)',
+          transition: 'all var(--transition)',
+        }}>{opt.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function StatCard({ label, value, sub, accent, icon }) {
+  return (
+    <Card style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>{label}</div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--ink-900)', fontFamily: 'var(--font-display)', letterSpacing: '-0.02em' }}>{value}</div>
+          {sub && <div style={{ fontSize: 12.5, color: 'var(--ink-500)', marginTop: 6, fontWeight: 600 }}>{sub}</div>}
+        </div>
+        {icon && (
+          <div style={{ width: 38, height: 38, borderRadius: 12, background: accent || 'var(--bg-sunken)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--skip-morado)', flexShrink: 0 }}>
+            {icon}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function EmptyState({ title, desc, action }) {
+  return (
+    <div style={{ textAlign: 'center', padding: '60px 24px', color: 'var(--ink-500)' }}>
+      <div style={{ display: 'inline-flex', width: 56, height: 56, borderRadius: 16, background: 'var(--bg-sunken)', alignItems: 'center', justifyContent: 'center', marginBottom: 18, color: 'var(--skip-morado)' }}>
+        <Icon.Leads size={26} />
+      </div>
+      <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--ink-900)', marginBottom: 6 }}>{title}</div>
+      {desc && <div style={{ fontSize: 14, maxWidth: 360, margin: '0 auto 18px' }}>{desc}</div>}
+      {action}
+    </div>
+  );
+}
+
+/* ============================================================
+   9. FUNNEL VISUAL — barras horizontales con conteo y tasa entre etapas
+   ============================================================ */
+
+function FunnelChart({ leadsSet, tipo }) {
+  const counts = funnelCounts(leadsSet, tipo);
+  const max = Math.max(1, counts[0]?.count || 0);
+  const color = TIPO_COLOR[tipo];
+
+  return (
+    <div>
+      {counts.map((row, i) => {
+        const width = max > 0 ? Math.max(6, (row.count / max) * 100) : 0;
+        const prev = i > 0 ? counts[i - 1] : null;
+        const dropRate = prev ? pct(row.count, prev.count) : null;
+        return (
+          <div key={row.etapa} style={{ marginBottom: i < counts.length - 1 ? 14 : 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink-900)' }}>{row.etapa}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-500)' }}>
+                {row.count} {prev && <span style={{ color: color.text, marginLeft: 6 }}>· {fmtPct(dropRate)} desde anterior</span>}
+              </span>
+            </div>
+            <div style={{ background: 'var(--bg-sunken)', borderRadius: 'var(--r-pill)', height: 14, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', width: width + '%', background: color.accent,
+                borderRadius: 'var(--r-pill)', transition: 'width 400ms ease',
+              }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ConversionRatesRow({ leadsSet, tipo }) {
+  const pares = PARES_CONVERSION[tipo];
+  return (
+    <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+      {pares.map(([a, b]) => {
+        const r = tasaConversion(leadsSet, tipo, a, b);
+        return (
+          <div key={a + b} style={{
+            flex: 1, minWidth: 220, background: 'var(--bg-sunken)', borderRadius: 'var(--r-md)', padding: '14px 16px',
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-500)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <span>{a}</span><Icon.ArrowRight size={11} /><span>{b}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 24, fontWeight: 800, color: 'var(--ink-900)', fontFamily: 'var(--font-display)' }}>{fmtPct1(r.tasa)}</span>
+              <span style={{ fontSize: 12.5, color: 'var(--ink-500)', fontWeight: 600 }}>{r.num} de {r.den}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ============================================================
+   10. COMPARATIVA TEMPORAL — tasas de cierre por modelo, por periodo
+   ============================================================ */
+
+function ComparativaTemporal({ leads }) {
+  const [periodo, setPeriodo] = useState('mensual');
+  const keyFn = periodKeyFn(periodo);
+
+  // Agrupamos por la fecha de creación del lead (cohorte de generación),
+  // y dentro de cada cohorte calculamos cuántos de esos leads cerraron (ganaron).
+  // Esto refleja "de los leads que entraron en este periodo, qué % cerró".
+  const tablaPorTipo = useMemo(() => {
+    const out = {};
+    Object.values(TIPOS).forEach(tipo => {
+      const set = leadsDeTipo(leads, tipo);
+      const groups = agruparPorPeriodo(set, keyFn, 'fechaCreacion');
+      const rows = {};
+      Object.entries(groups).forEach(([key, arr]) => {
+        const ganados = arr.filter(l => l.estado === ESTADOS.GANADO).length;
+        const perdidos = arr.filter(l => l.estado === ESTADOS.PERDIDO).length;
+        const abiertos = arr.filter(l => l.estado === ESTADOS.ABIERTO).length;
+        rows[key] = { total: arr.length, ganados, perdidos, abiertos, tasa: pct(ganados, arr.length) };
+      });
+      out[tipo] = rows;
+    });
+    return out;
+  }, [leads, periodo]);
+
+  const allKeys = useMemo(() => {
+    const s = new Set();
+    Object.values(tablaPorTipo).forEach(rows => Object.keys(rows).forEach(k => s.add(k)));
+    return sortPeriodKeys([...s], periodo);
+  }, [tablaPorTipo, periodo]);
+
+  return (
+    <Card>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h3 style={{ fontSize: 16.5 }}>Tasa de cierre por modelo de negocio</h3>
+          <p style={{ fontSize: 13, color: 'var(--ink-500)', margin: '4px 0 0', fontWeight: 500 }}>Ganados / total de leads creados en el periodo</p>
+        </div>
+        <SegmentedControl
+          value={periodo} onChange={setPeriodo}
+          options={[{ value: 'mensual', label: 'Mensual' }, { value: 'trimestral', label: 'Trimestral' }, { value: 'anual', label: 'Anual' }]}
+        />
+      </div>
+
+      {allKeys.length === 0 ? (
+        <EmptyState title="Aún no hay datos suficientes" desc="Crea leads con fecha de creación para ver la comparativa por periodo." />
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 560 }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Periodo</th>
+                {Object.values(TIPOS).map(tipo => (
+                  <th key={tipo} style={{ ...thStyle, textAlign: 'center' }}>
+                    <TipoPill tipo={tipo} size="sm" />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {allKeys.map(key => (
+                <tr key={key}>
+                  <td style={tdStyle}><span style={{ fontWeight: 700 }}>{periodLabel(key, periodo)}</span></td>
+                  {Object.values(TIPOS).map(tipo => {
+                    const row = tablaPorTipo[tipo][key];
+                    return (
+                      <td key={tipo} style={{ ...tdStyle, textAlign: 'center' }}>
+                        {row ? (
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: 15, color: TIPO_COLOR[tipo].text }}>{fmtPct1(row.tasa)}</div>
+                            <div style={{ fontSize: 11.5, color: 'var(--ink-500)', fontWeight: 600 }}>{row.ganados}/{row.total} cerrados</div>
+                          </div>
+                        ) : <span style={{ color: 'var(--ink-300)' }}>—</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+const thStyle = { textAlign: 'left', padding: '8px 14px', fontSize: 11.5, fontWeight: 700, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: '0.04em', borderBottom: '2px solid var(--border-soft)' };
+const tdStyle = { padding: '12px 14px', borderBottom: '1px solid var(--border-soft)' };
+
+/* ============================================================
+   12. MODAL
+   ============================================================ */
+
+function Modal({ open, onClose, children, width = 560, title }) {
+  if (!open) return null;
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(28,5,48,0.45)', backdropFilter: 'blur(2px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'var(--bg-canvas)', borderRadius: 'var(--r-xl)', width: '100%', maxWidth: width,
+        maxHeight: '88vh', overflowY: 'auto', boxShadow: 'var(--shadow-lg)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid var(--border-soft)', position: 'sticky', top: 0, background: 'var(--bg-canvas)', borderRadius: 'var(--r-xl) var(--r-xl) 0 0', zIndex: 1 }}>
+          <h3 style={{ fontSize: 17 }}>{title}</h3>
+          <button onClick={onClose} style={{ background: 'var(--bg-sunken)', border: 'none', borderRadius: '50%', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-700)' }}>
+            <Icon.Close size={15} />
+          </button>
+        </div>
+        <div style={{ padding: 24 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   13. CAMPOS DE FORMULARIO
+   ============================================================ */
+
+function Field({ label, children, required, hint }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--ink-700)', marginBottom: 7 }}>
+        {label} {required && <span style={{ color: 'var(--state-danger)' }}>*</span>}
+      </label>
+      {children}
+      {hint && <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 5 }}>{hint}</div>}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: '100%', padding: '11px 14px', borderRadius: 'var(--r-md)',
+  border: '1.5px solid var(--border-strong)', fontSize: 14, fontFamily: 'var(--font-body)',
+  color: 'var(--ink-900)', background: 'var(--bg-canvas)', transition: 'border-color var(--transition)',
+};
+
+function TextInput(props) {
+  return <input {...props} style={{ ...inputStyle, ...(props.style||{}) }}
+    onFocus={e => e.target.style.borderColor = 'var(--skip-cyan)'}
+    onBlur={e => e.target.style.borderColor = 'var(--border-strong)'} />;
+}
+
+function Select({ value, onChange, options, placeholder }) {
+  return (
+    <select value={value || ''} onChange={e => onChange(e.target.value)} style={{ ...inputStyle, appearance: 'none', cursor: 'pointer' }}>
+      <option value="" disabled>{placeholder || 'Selecciona...'}</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+}
+
+/* ============================================================
+   14. FORMULARIO DE LEAD (crear / editar)
+   ============================================================ */
+
+function emptyLeadForTipo(tipo) {
+  const base = { tipo, fechaCreacion: todayISO(), etapaIndex: 0, estado: ESTADOS.ABIERTO, fechaCierre: null, motivoPerdida: null, notas: '' };
+  if (tipo === 'B2B') return { ...base, empresa: '', contacto: '', email: '', vertical: '', stageDates: {} };
+  if (tipo === 'B2B2C') return { ...base, nombre: '', email: '', celular: '', prestador: '', verticalPrestador: '', stageDates: {} };
+  return { ...base, nombre: '', email: '', celular: '', vertical: '', stageDates: {} };
+}
+
+function LeadForm({ initial, onSave, onCancel }) {
+  const [tipo, setTipo] = useState(initial ? initial.tipo : 'B2B');
+  const [form, setForm] = useState(initial ? { ...initial } : emptyLeadForTipo('B2B'));
+  const isEdit = !!initial;
+
+  useEffect(() => {
+    if (!isEdit) setForm(emptyLeadForTipo(tipo));
+  }, [tipo]);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const camposValidos = () => {
+    if (!form.fechaCreacion) return false;
+    if (tipo === 'B2B') return form.empresa && form.contacto && form.email && form.vertical;
+    if (tipo === 'B2B2C') return form.nombre && form.email && form.celular && form.prestador && form.verticalPrestador;
+    return form.nombre && form.email && form.celular && form.vertical;
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!camposValidos()) return;
+    const stageDates = { ...(form.stageDates || {}) };
+    const primeraEtapa = ETAPAS[tipo][0];
+    if (!stageDates[primeraEtapa]) stageDates[primeraEtapa] = form.fechaCreacion;
+    onSave({ ...form, tipo, stageDates, id: form.id || uid() });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {!isEdit && (
+        <Field label="Tipo de cliente" required>
+          <SegmentedControl
+            value={tipo} onChange={setTipo}
+            options={Object.values(TIPOS).map(t => ({ value: t, label: t }))}
+          />
+          <div style={{ fontSize: 12.5, color: 'var(--ink-500)', marginTop: 8 }}>{TIPO_DESC[tipo]}</div>
+        </Field>
+      )}
+
+      {tipo === 'B2B' && (
+        <React.Fragment>
+          <Field label="Nombre empresa" required>
+            <TextInput value={form.empresa} onChange={e => set('empresa', e.target.value)} placeholder="Ej: Clínica Vespucio" required />
+          </Field>
+          <Field label="Nombre contacto" required>
+            <TextInput value={form.contacto} onChange={e => set('contacto', e.target.value)} placeholder="Ej: Marcela Reyes" required />
+          </Field>
+          <Field label="Correo" required>
+            <TextInput type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="nombre@empresa.cl" required />
+          </Field>
+          <Field label="Origen / vertical" required>
+            <Select value={form.vertical} onChange={v => set('vertical', v)} options={VERTICALES.B2B} placeholder="¿Cómo llegó este contacto?" />
+          </Field>
+        </React.Fragment>
+      )}
+
+      {tipo === 'B2B2C' && (
+        <React.Fragment>
+          <Field label="Nombre" required>
+            <TextInput value={form.nombre} onChange={e => set('nombre', e.target.value)} placeholder="Nombre completo del paciente" required />
+          </Field>
+          <Field label="Correo" required>
+            <TextInput type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="correo@ejemplo.com" required />
+          </Field>
+          <Field label="Celular" required>
+            <TextInput value={form.celular} onChange={e => set('celular', e.target.value)} placeholder="+56 9 0000 0000" required />
+          </Field>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <Field label="Nombre del prestador" required hint="Origen: prestador">
+              <TextInput value={form.prestador} onChange={e => set('prestador', e.target.value)} placeholder="Ej: Clínica Vespucio" required />
+            </Field>
+            <Field label="Vertical del prestador" required hint="Origen: vertical">
+              <Select value={form.verticalPrestador} onChange={v => set('verticalPrestador', v)} options={VERTICALES.B2B2C} placeholder="Selecciona..." />
+            </Field>
+          </div>
+        </React.Fragment>
+      )}
+
+      {tipo === 'B2C' && (
+        <React.Fragment>
+          <Field label="Nombre" required>
+            <TextInput value={form.nombre} onChange={e => set('nombre', e.target.value)} placeholder="Nombre completo" required />
+          </Field>
+          <Field label="Correo" required>
+            <TextInput type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="correo@ejemplo.com" required />
+          </Field>
+          <Field label="Celular" required>
+            <TextInput value={form.celular} onChange={e => set('celular', e.target.value)} placeholder="+56 9 0000 0000" required />
+          </Field>
+          <Field label="Origen / vertical" required>
+            <Select value={form.vertical} onChange={v => set('vertical', v)} options={VERTICALES.B2C} placeholder="¿Cómo llegó este lead?" />
+          </Field>
+        </React.Fragment>
+      )}
+
+      <Field label="Fecha de creación del lead" required hint="Se usa para calcular el ciclo de venta y las comparativas por periodo.">
+        <TextInput type="date" value={form.fechaCreacion} onChange={e => set('fechaCreacion', e.target.value)} required />
+      </Field>
+
+      {isEdit && (
+        <Field label="Notas internas">
+          <textarea value={form.notas || ''} onChange={e => set('notas', e.target.value)} rows={3}
+            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--font-body)' }}
+            placeholder="Contexto, próximos pasos, objeciones..." />
+        </Field>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, marginTop: 22, justifyContent: 'flex-end' }}>
+        <Btn variant="ghost" onClick={onCancel}>Cancelar</Btn>
+        <Btn type="submit" disabled={!camposValidos()}>{isEdit ? 'Guardar cambios' : 'Crear lead'}</Btn>
+      </div>
+    </form>
+  );
+}
+
+function Dashboard({ leads, onGoTipo, onNuevoLead }) {
+  const totales = useMemo(() => {
+    const out = {};
+    Object.values(TIPOS).forEach(tipo => {
+      const set = leadsDeTipo(leads, tipo);
+      const cierre = tasaCierreGlobal(leads, tipo);
+      const ciclo = cicloVentaPromedio(set);
+      const abiertos = set.filter(l => l.estado === ESTADOS.ABIERTO).length;
+      out[tipo] = { total: set.length, abiertos, cierre, ciclo };
+    });
+    return out;
+  }, [leads]);
+
+  const totalGeneral = leads.length;
+  const ganadosGeneral = leads.filter(l => l.estado === ESTADOS.GANADO).length;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 22, flexWrap: 'wrap', gap: 14 }}>
+        <div>
+          <h2 style={{ fontSize: 23 }}>Resumen comercial</h2>
+          <p style={{ fontSize: 14, color: 'var(--ink-500)', margin: '6px 0 0', fontWeight: 500 }}>
+            {totalGeneral} leads totales · {ganadosGeneral} cerrados con éxito
+          </p>
+        </div>
+        <Btn icon={<Icon.Plus />} onClick={onNuevoLead}>Nuevo lead</Btn>
+      </div>
+
+      <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
+        {Object.values(TIPOS).map(tipo => (
+          <StatCard
+            key={tipo}
+            label={TIPO_LABEL[tipo]}
+            value={fmtPct1(totales[tipo].cierre.tasa)}
+            sub={`${totales[tipo].cierre.num} cerrados de ${totales[tipo].cierre.den} · ${totales[tipo].abiertos} abiertos`}
+            accent={TIPO_COLOR[tipo].accentSoft}
+            icon={<Icon.Bolt size={18} />}
+          />
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
+        {Object.values(TIPOS).map(tipo => (
+          <StatCard
+            key={tipo + '_ciclo'}
+            label={`Ciclo de venta · ${tipo}`}
+            value={totales[tipo].ciclo !== null ? Math.round(totales[tipo].ciclo) + ' días' : '—'}
+            sub="Promedio entre creación y cierre"
+            accent={TIPO_COLOR[tipo].accentSoft}
+            icon={<Icon.Calendar size={16} />}
+          />
+        ))}
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <ComparativaTemporal leads={leads} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+        {Object.values(TIPOS).map(tipo => {
+          const set = leadsDeTipo(leads, tipo);
+          return (
+            <Card key={tipo}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <TipoPill tipo={tipo} />
+                  <h3 style={{ fontSize: 15.5, marginTop: 8 }}>Funnel {tipo}</h3>
+                </div>
+                <button onClick={() => onGoTipo(tipo)} style={{ background: 'none', border: 'none', color: 'var(--skip-morado)', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  Ver leads <Icon.ArrowRight size={12} />
+                </button>
+              </div>
+              {set.length === 0 ? (
+                <p style={{ fontSize: 13.5, color: 'var(--ink-500)' }}>Sin leads registrados todavía.</p>
+              ) : (
+                <React.Fragment>
+                  <FunnelChart leadsSet={set} tipo={tipo} />
+                  <div style={{ marginTop: 18 }}>
+                    <ConversionRatesRow leadsSet={set} tipo={tipo} />
+                  </div>
+                </React.Fragment>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   15. LISTA DE LEADS — filtros, búsqueda, tabla
+   ============================================================ */
+
+function nombreLead(l) {
+  return l.tipo === 'B2B' ? l.empresa : l.nombre;
+}
+
+function origenLead(l) {
+  if (l.tipo === 'B2B' || l.tipo === 'B2C') return l.vertical;
+  return `${l.prestador} · ${l.verticalPrestador}`;
+}
+
+function etapaActualLabel(l) {
+  if (l.estado === ESTADOS.GANADO) return ETAPA_CIERRE[l.tipo];
+  return ETAPAS[l.tipo][l.etapaIndex];
+}
+
+function LeadsList({ leads, tipoFiltroInicial, onOpenLead, onNuevoLead }) {
+  const [tipoFiltro, setTipoFiltro] = useState(tipoFiltroInicial || 'TODOS');
+  const [estadoFiltro, setEstadoFiltro] = useState('TODOS');
+  const [query, setQuery] = useState('');
+
+  useEffect(() => { setTipoFiltro(tipoFiltroInicial || 'TODOS'); }, [tipoFiltroInicial]);
+
+  const filtrados = useMemo(() => {
+    return leads.filter(l => {
+      if (tipoFiltro !== 'TODOS' && l.tipo !== tipoFiltro) return false;
+      if (estadoFiltro !== 'TODOS' && l.estado !== estadoFiltro) return false;
+      if (query) {
+        const q = query.toLowerCase();
+        const hay = [
+          nombreLead(l), l.email, l.contacto, l.celular, origenLead(l)
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    }).sort((a, b) => (b.fechaCreacion || '').localeCompare(a.fechaCreacion || ''));
+  }, [leads, tipoFiltro, estadoFiltro, query]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 18, flexWrap: 'wrap', gap: 14 }}>
+        <div>
+          <h2 style={{ fontSize: 23 }}>Leads</h2>
+          <p style={{ fontSize: 14, color: 'var(--ink-500)', margin: '6px 0 0', fontWeight: 500 }}>{filtrados.length} resultado{filtrados.length !== 1 ? 's' : ''}</p>
+        </div>
+        <Btn icon={<Icon.Plus />} onClick={onNuevoLead}>Nuevo lead</Btn>
+      </div>
+
+      <Card style={{ marginBottom: 16 }} pad={16}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ position: 'relative', flex: '1 1 240px' }}>
+            <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-300)' }}><Icon.Search size={15} /></span>
+            <TextInput value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar por nombre, correo, origen..." style={{ paddingLeft: 36 }} />
+          </div>
+          <SegmentedControl
+            value={tipoFiltro} onChange={setTipoFiltro}
+            options={[{ value: 'TODOS', label: 'Todos' }, ...Object.values(TIPOS).map(t => ({ value: t, label: t }))]}
+          />
+          <SegmentedControl
+            value={estadoFiltro} onChange={setEstadoFiltro}
+            options={[{ value: 'TODOS', label: 'Todos' }, { value: ESTADOS.ABIERTO, label: 'Abiertos' }, { value: ESTADOS.GANADO, label: 'Ganados' }, { value: ESTADOS.PERDIDO, label: 'Perdidos' }]}
+          />
+        </div>
+      </Card>
+
+      <Card pad={0}>
+        {filtrados.length === 0 ? (
+          <EmptyState
+            title="No hay leads que coincidan"
+            desc="Ajusta los filtros o crea un nuevo lead para empezar a hacer seguimiento."
+            action={<Btn icon={<Icon.Plus />} onClick={onNuevoLead}>Nuevo lead</Btn>}
+          />
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 760 }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Nombre</th>
+                  <th style={thStyle}>Tipo</th>
+                  <th style={thStyle}>Origen</th>
+                  <th style={thStyle}>Etapa actual</th>
+                  <th style={thStyle}>Estado</th>
+                  <th style={thStyle}>Creado</th>
+                  <th style={thStyle}>Cerrado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtrados.map(l => (
+                  <tr key={l.id} onClick={() => onOpenLead(l)} style={{ cursor: 'pointer' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-sunken)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <td style={tdStyle}>
+                      <div style={{ fontWeight: 700, color: 'var(--ink-900)' }}>{nombreLead(l)}</div>
+                      <div style={{ fontSize: 12, color: 'var(--ink-500)' }}>{l.email}</div>
+                    </td>
+                    <td style={tdStyle}><TipoPill tipo={l.tipo} size="sm" /></td>
+                    <td style={tdStyle}><span style={{ color: 'var(--ink-700)', fontWeight: 600 }}>{origenLead(l)}</span></td>
+                    <td style={tdStyle}>{etapaActualLabel(l)}</td>
+                    <td style={tdStyle}><EstadoPill estado={l.estado} size="sm" /></td>
+                    <td style={tdStyle}>{formatDateShort(l.fechaCreacion)}</td>
+                    <td style={tdStyle}>{l.fechaCierre ? formatDateShort(l.fechaCierre) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================
+   16. DETALLE DE LEAD — avance de etapas, cierre, edición
+   ============================================================ */
+
+function LeadDetail({ lead, onUpdate, onDelete, onClose, onEdit }) {
+  const etapas = ETAPAS[lead.tipo];
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [motivoSel, setMotivoSel] = useState(lead.motivoPerdida || MOTIVOS_PERDIDA[0]);
+  const [showPerdidoForm, setShowPerdidoForm] = useState(false);
+
+  const ciclo = lead.estado === ESTADOS.GANADO && lead.fechaCierre ? diffDays(lead.fechaCreacion, lead.fechaCierre) : null;
+  const diasAbierto = lead.estado === ESTADOS.ABIERTO ? diffDays(lead.fechaCreacion, todayISO()) : null;
+
+  const avanzarEtapa = () => {
+    const nextIdx = lead.etapaIndex + 1;
+    if (nextIdx >= etapas.length) return;
+    const stageDates = { ...lead.stageDates, [etapas[nextIdx]]: todayISO() };
+    const esUltima = nextIdx === etapas.length - 1;
+    onUpdate({
+      ...lead, etapaIndex: nextIdx, stageDates,
+      estado: esUltima ? ESTADOS.GANADO : lead.estado,
+      fechaCierre: esUltima ? todayISO() : lead.fechaCierre,
+    });
+  };
+
+  const retrocederEtapa = () => {
+    const prevIdx = lead.etapaIndex - 1;
+    if (prevIdx < 0) return;
+    onUpdate({ ...lead, etapaIndex: prevIdx, estado: ESTADOS.ABIERTO, fechaCierre: null });
+  };
+
+  const marcarGanado = () => {
+    const lastIdx = etapas.length - 1;
+    const stageDates = { ...lead.stageDates };
+    for (let i = 0; i <= lastIdx; i++) if (!stageDates[etapas[i]]) stageDates[etapas[i]] = todayISO();
+    onUpdate({ ...lead, etapaIndex: lastIdx, estado: ESTADOS.GANADO, fechaCierre: todayISO(), stageDates });
+  };
+
+  const confirmarPerdido = () => {
+    onUpdate({ ...lead, estado: ESTADOS.PERDIDO, fechaCierre: todayISO(), motivoPerdida: motivoSel });
+    setShowPerdidoForm(false);
+  };
+
+  const reabrir = () => {
+    onUpdate({ ...lead, estado: ESTADOS.ABIERTO, fechaCierre: null, motivoPerdida: null });
+  };
+
+  const updateStageDate = (etapa, fecha) => {
+    onUpdate({ ...lead, stageDates: { ...lead.stageDates, [etapa]: fecha } });
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, gap: 14 }}>
+        <div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <TipoPill tipo={lead.tipo} />
+            <EstadoPill estado={lead.estado} />
+          </div>
+          <h2 style={{ fontSize: 22 }}>{nombreLead(lead)}</h2>
+          <p style={{ fontSize: 13.5, color: 'var(--ink-500)', margin: '4px 0 0', fontWeight: 600 }}>{origenLead(lead)}</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn variant="secondary" size="sm" onClick={() => onEdit(lead)}>Editar datos</Btn>
+          <Btn variant="ghost" size="sm" onClick={onClose}>Cerrar</Btn>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 22 }}>
+        <Card pad={14}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-500)', textTransform: 'uppercase', marginBottom: 6 }}>Creado</div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>{formatDate(lead.fechaCreacion)}</div>
+        </Card>
+        <Card pad={14}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-500)', textTransform: 'uppercase', marginBottom: 6 }}>Cierre</div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>{lead.fechaCierre ? formatDate(lead.fechaCierre) : '—'}</div>
+        </Card>
+        <Card pad={14}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-500)', textTransform: 'uppercase', marginBottom: 6 }}>Ciclo de venta</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: ciclo !== null ? 'var(--state-success)' : 'var(--ink-900)' }}>
+            {ciclo !== null ? `${ciclo} días` : (diasAbierto !== null ? `${diasAbierto} días (en curso)` : '—')}
+          </div>
+        </Card>
+        <Card pad={14}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-500)', textTransform: 'uppercase', marginBottom: 6 }}>Contacto</div>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>{lead.email}</div>
+          {lead.celular && <div style={{ fontSize: 12.5, color: 'var(--ink-500)' }}>{lead.celular}</div>}
+        </Card>
+      </div>
+
+      {lead.estado === ESTADOS.PERDIDO && (
+        <Card style={{ marginBottom: 20, background: 'var(--state-danger-bg)', border: '1px solid #F0C6CD' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontWeight: 700, color: 'var(--state-danger)', fontSize: 14 }}>Lead perdido</div>
+              <div style={{ fontSize: 13, color: 'var(--ink-700)', marginTop: 2 }}>Motivo: {lead.motivoPerdida || 'No especificado'}</div>
+            </div>
+            <Btn variant="secondary" size="sm" onClick={reabrir}>Reabrir lead</Btn>
+          </div>
+        </Card>
+      )}
+
+      <Card style={{ marginBottom: 20 }}>
+        <h3 style={{ fontSize: 15.5, marginBottom: 16 }}>Avance del funnel</h3>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 0, marginBottom: 20 }}>
+          {etapas.map((etapa, i) => {
+            const activa = i <= lead.etapaIndex || lead.estado === ESTADOS.GANADO;
+            const esActual = i === lead.etapaIndex && lead.estado !== ESTADOS.GANADO;
+            return (
+              <React.Fragment key={etapa}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 110 }}>
+                  <div style={{
+                    width: 34, height: 34, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: activa ? 'var(--skip-morado)' : 'var(--bg-sunken)',
+                    color: activa ? '#fff' : 'var(--ink-300)',
+                    border: esActual ? '3px solid var(--skip-cyan)' : 'none',
+                    fontWeight: 800, fontSize: 13,
+                  }}>
+                    {activa ? <Icon.Check size={14} /> : i + 1}
+                  </div>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, textAlign: 'center', marginTop: 8, color: activa ? 'var(--ink-900)' : 'var(--ink-300)', maxWidth: 100 }}>{etapa}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-500)', marginTop: 2 }}>{formatDateShort(fechaEnEtapa(lead, etapa))}</div>
+                </div>
+                {i < etapas.length - 1 && <div style={{ flex: 1, height: 2, background: i < lead.etapaIndex || lead.estado === ESTADOS.GANADO ? 'var(--skip-morado)' : 'var(--border-soft)', marginTop: 17, minWidth: 24 }} />}
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        {lead.estado === ESTADOS.ABIERTO && (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {lead.etapaIndex > 0 && <Btn variant="secondary" size="sm" onClick={retrocederEtapa}>← Retroceder etapa</Btn>}
+            {lead.etapaIndex < etapas.length - 1 ? (
+              <Btn size="sm" onClick={avanzarEtapa}>Avanzar a "{etapas[lead.etapaIndex + 1]}"</Btn>
+            ) : (
+              <Btn size="sm" variant="primary" onClick={marcarGanado}>Marcar como Ganado</Btn>
+            )}
+            {!showPerdidoForm ? (
+              <Btn size="sm" variant="danger" onClick={() => setShowPerdidoForm(true)}>Marcar como Perdido</Btn>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Select value={motivoSel} onChange={setMotivoSel} options={MOTIVOS_PERDIDA} />
+                <Btn size="sm" variant="danger" onClick={confirmarPerdido}>Confirmar</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => setShowPerdidoForm(false)}>Cancelar</Btn>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <Card style={{ marginBottom: 20 }}>
+        <h3 style={{ fontSize: 15.5, marginBottom: 14 }}>Fechas por etapa</h3>
+        <p style={{ fontSize: 12.5, color: 'var(--ink-500)', marginTop: 0, marginBottom: 14 }}>Edítalas si necesitas corregir el historial real del lead.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+          {etapas.map((etapa, i) => {
+            const alcanzada = i <= lead.etapaIndex || lead.estado === ESTADOS.GANADO;
+            return (
+              <Field key={etapa} label={etapa}>
+                <TextInput type="date" disabled={!alcanzada} value={fechaEnEtapa(lead, etapa) || ''}
+                  onChange={e => updateStageDate(etapa, e.target.value)} />
+              </Field>
+            );
+          })}
+        </div>
+      </Card>
+
+      {lead.notas && (
+        <Card style={{ marginBottom: 20 }}>
+          <h3 style={{ fontSize: 15.5, marginBottom: 10 }}>Notas</h3>
+          <p style={{ fontSize: 13.5, color: 'var(--ink-700)', whiteSpace: 'pre-wrap' }}>{lead.notas}</p>
+        </Card>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        {!confirmDelete ? (
+          <Btn variant="ghost" size="sm" icon={<Icon.Trash size={14} />} onClick={() => setConfirmDelete(true)} style={{ color: 'var(--state-danger)' }}>Eliminar lead</Btn>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 13, color: 'var(--ink-500)' }}>¿Eliminar definitivamente?</span>
+            <Btn size="sm" variant="danger" onClick={() => onDelete(lead.id)}>Sí, eliminar</Btn>
+            <Btn size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancelar</Btn>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   17. EXPORTAR / IMPORTAR — respaldo manual entre los dos usuarios del piloto
+   ============================================================ */
+
+function exportarJSON(data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `skip-crm-respaldo-${todayISO()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportarCSV(leads) {
+  const cols = ['id','tipo','nombre','empresa','contacto','email','celular','vertical','prestador','verticalPrestador','etapaActual','estado','motivoPerdida','fechaCreacion','fechaCierre','cicloVentaDias','notas'];
+  const rows = leads.map(l => {
+    const ciclo = l.estado === ESTADOS.GANADO && l.fechaCierre ? diffDays(l.fechaCreacion, l.fechaCierre) : '';
+    const obj = {
+      id: l.id, tipo: l.tipo, nombre: l.nombre || '', empresa: l.empresa || '', contacto: l.contacto || '',
+      email: l.email || '', celular: l.celular || '', vertical: l.vertical || '', prestador: l.prestador || '',
+      verticalPrestador: l.verticalPrestador || '', etapaActual: etapaActualLabel(l), estado: l.estado,
+      motivoPerdida: l.motivoPerdida || '', fechaCreacion: l.fechaCreacion || '', fechaCierre: l.fechaCierre || '',
+      cicloVentaDias: ciclo, notas: (l.notas || '').replace(/\n/g, ' '),
+    };
+    return cols.map(c => {
+      const v = String(obj[c] ?? '');
+      return v.includes(',') || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v;
+    }).join(',');
+  });
+  const csv = [cols.join(','), ...rows].join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `skip-crm-leads-${todayISO()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* ============================================================
+   18. SIDEBAR / NAVEGACIÓN
+   ============================================================ */
+
+function Sidebar({ view, setView, onNuevoLead, totalLeads }) {
+  const items = [
+    { id: 'dashboard', label: 'Resumen', icon: Icon.Dashboard },
+    { id: 'leads', label: 'Leads', icon: Icon.Leads },
+    { id: 'comparativa', label: 'Comparativa', icon: Icon.Compare },
+  ];
+  return (
+    <div style={{
+      width: 240, background: 'var(--bg-dark)', color: 'var(--ink-on-dark)',
+      display: 'flex', flexDirection: 'column', flexShrink: 0, minHeight: '100vh',
+      padding: '26px 18px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 34, padding: '0 6px' }}>
+        <SkipLogoMark size={30} />
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 18, color: '#fff', letterSpacing: '-0.01em' }}>skip</div>
+          <div style={{ fontSize: 10.5, color: 'var(--ink-on-dark-soft)', fontWeight: 600, letterSpacing: '0.02em' }}>CRM COMERCIAL</div>
+        </div>
+      </div>
+
+      <Btn onClick={onNuevoLead} icon={<Icon.Plus />} style={{ width: '100%', marginBottom: 22, background: 'var(--skip-rosa)', color: 'var(--skip-morado)' }}>Nuevo lead</Btn>
+
+      <nav style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {items.map(it => {
+          const active = view === it.id;
+          const ItemIcon = it.icon;
+          return (
+            <button key={it.id} onClick={() => setView(it.id)} style={{
+              display: 'flex', alignItems: 'center', gap: 11, padding: '11px 14px', borderRadius: 'var(--r-md)',
+              border: 'none', background: active ? 'rgba(255,255,255,0.12)' : 'transparent',
+              color: active ? '#fff' : 'var(--ink-on-dark-soft)', fontWeight: 700, fontSize: 14, textAlign: 'left',
+              transition: 'all var(--transition)',
+            }}
+            onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+            onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <ItemIcon size={17} />{it.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div style={{ marginTop: 'auto', paddingTop: 20, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ fontSize: 11.5, color: 'var(--ink-on-dark-soft)', fontWeight: 600, marginBottom: 4 }}>{totalLeads} leads en seguimiento</div>
+        <div style={{ fontSize: 10.5, color: 'rgba(244,239,246,0.45)', fontWeight: 500 }}>Sáltate los trámites de salud</div>
+      </div>
+    </div>
+  );
+}
+
+function SkipLogoMark({ size = 28 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48">
+      <rect width="48" height="48" rx="11" fill="#43136B" />
+      <g transform="translate(24,24)">
+        {[0,1,2,3,4,5].map(i => {
+          const angle = (i * 60) * Math.PI / 180;
+          const x1 = Math.cos(angle) * 5, y1 = Math.sin(angle) * 5;
+          const x2 = Math.cos(angle) * 13, y2 = Math.sin(angle) * 13;
+          return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#EBB1CC" strokeWidth="4.2" strokeLinecap="round" />;
+        })}
+      </g>
+    </svg>
+  );
+}
+
+/* ============================================================
+   19. VISTA COMPARATIVA (dedicada, con foco en ciclo de venta)
+   ============================================================ */
+
+function ComparativaView({ leads }) {
+  const ciclosPorTipo = useMemo(() => {
+    const out = {};
+    Object.values(TIPOS).forEach(tipo => {
+      const set = leadsDeTipo(leads, tipo);
+      out[tipo] = {
+        ciclo: cicloVentaPromedio(set),
+        cierre: tasaCierreGlobal(leads, tipo),
+      };
+    });
+    return out;
+  }, [leads]);
+
+  return (
+    <div>
+      <div style={{ marginBottom: 22 }}>
+        <h2 style={{ fontSize: 23 }}>Comparativa entre modelos</h2>
+        <p style={{ fontSize: 14, color: 'var(--ink-500)', margin: '6px 0 0', fontWeight: 500 }}>Tasas de cierre, ciclo de venta y conversión entre etapas, lado a lado.</p>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <ComparativaTemporal leads={leads} />
+      </div>
+
+      <Card style={{ marginBottom: 24 }}>
+        <h3 style={{ fontSize: 16, marginBottom: 16 }}>Ciclo de venta promedio (leads ganados)</h3>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          {Object.values(TIPOS).map(tipo => (
+            <div key={tipo} style={{ flex: 1, minWidth: 180 }}>
+              <div style={{ marginBottom: 8 }}><TipoPill tipo={tipo} size="sm" /></div>
+              <div style={{ fontSize: 28, fontWeight: 800, fontFamily: 'var(--font-display)', color: TIPO_COLOR[tipo].text }}>
+                {ciclosPorTipo[tipo].ciclo !== null ? Math.round(ciclosPorTipo[tipo].ciclo) : '—'}
+                {ciclosPorTipo[tipo].ciclo !== null && <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-500)', marginLeft: 4 }}>días</span>}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-500)', fontWeight: 600, marginTop: 4 }}>Tasa de cierre global: {fmtPct1(ciclosPorTipo[tipo].cierre.tasa)}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+        {Object.values(TIPOS).map(tipo => {
+          const set = leadsDeTipo(leads, tipo);
+          return (
+            <Card key={tipo}>
+              <TipoPill tipo={tipo} />
+              <h3 style={{ fontSize: 15, marginTop: 10, marginBottom: 14 }}>Conversión entre etapas</h3>
+              {set.length === 0 ? <p style={{ fontSize: 13.5, color: 'var(--ink-500)' }}>Sin datos.</p> : <ConversionRatesRow leadsSet={set} tipo={tipo} />}
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   20. APP — shell principal, estado global, routing
+   ============================================================ */
+
+function App() {
+  const [leads, setLeads] = useState(() => {
+    const stored = loadData();
+    return stored ? stored.leads : buildSeed().leads;
+  });
+  const [view, setView] = useState('dashboard');
+  const [tipoFiltroLeads, setTipoFiltroLeads] = useState('TODOS');
+  const [selectedLead, setSelectedLead] = useState(null);
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [editingLead, setEditingLead] = useState(null);
+  const fileInputRef = useRef(null);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    saveData({ leads, version: 1 });
+  }, [leads]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2600);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const handleCreateLead = (leadData) => {
+    setLeads(prev => [...prev, leadData]);
+    setShowNewForm(false);
+    setToast('Lead creado correctamente');
+  };
+
+  const handleUpdateLead = (updated) => {
+    setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    setSelectedLead(updated);
+  };
+
+  const handleEditSave = (updated) => {
+    setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    setEditingLead(null);
+    setSelectedLead(updated);
+    setToast('Cambios guardados');
+  };
+
+  const handleDeleteLead = (id) => {
+    setLeads(prev => prev.filter(l => l.id !== id));
+    setSelectedLead(null);
+    setToast('Lead eliminado');
+  };
+
+  const handleGoTipo = (tipo) => {
+    setTipoFiltroLeads(tipo);
+    setView('leads');
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (parsed && Array.isArray(parsed.leads)) {
+          setLeads(parsed.leads);
+          setToast('Datos importados correctamente');
+        } else {
+          setToast('Archivo inválido: no contiene leads');
+        }
+      } catch (err) {
+        setToast('No se pudo leer el archivo');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <Sidebar view={view} setView={setView} onNuevoLead={() => setShowNewForm(true)} totalLeads={leads.length} />
+
+      <div style={{ flex: 1, padding: '32px 36px', maxWidth: 1280 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 18 }}>
+          <Btn variant="ghost" size="sm" icon={<Icon.Export size={14} />} onClick={() => exportarCSV(leads)}>Exportar CSV</Btn>
+          <Btn variant="ghost" size="sm" icon={<Icon.Export size={14} />} onClick={() => exportarJSON({ leads, version: 1 })}>Respaldar JSON</Btn>
+          <Btn variant="ghost" size="sm" icon={<Icon.Import size={14} />} onClick={() => fileInputRef.current.click()}>Importar JSON</Btn>
+          <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImport} style={{ display: 'none' }} />
+        </div>
+
+        {view === 'dashboard' && <Dashboard leads={leads} onGoTipo={handleGoTipo} onNuevoLead={() => setShowNewForm(true)} />}
+        {view === 'leads' && (
+          <LeadsList
+            leads={leads}
+            tipoFiltroInicial={tipoFiltroLeads}
+            onOpenLead={setSelectedLead}
+            onNuevoLead={() => setShowNewForm(true)}
+          />
+        )}
+        {view === 'comparativa' && <ComparativaView leads={leads} />}
+      </div>
+
+      <Modal open={showNewForm} onClose={() => setShowNewForm(false)} title="Nuevo lead" width={560}>
+        <LeadForm onSave={handleCreateLead} onCancel={() => setShowNewForm(false)} />
+      </Modal>
+
+      <Modal open={!!editingLead} onClose={() => setEditingLead(null)} title="Editar lead" width={560}>
+        {editingLead && <LeadForm initial={editingLead} onSave={handleEditSave} onCancel={() => setEditingLead(null)} />}
+      </Modal>
+
+      <Modal open={!!selectedLead && !editingLead} onClose={() => setSelectedLead(null)} title="" width={720}>
+        {selectedLead && (
+          <LeadDetail
+            lead={leads.find(l => l.id === selectedLead.id) || selectedLead}
+            onUpdate={handleUpdateLead}
+            onDelete={handleDeleteLead}
+            onClose={() => setSelectedLead(null)}
+            onEdit={(l) => setEditingLead(l)}
+          />
+        )}
+      </Modal>
+
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          background: 'var(--skip-morado)', color: '#fff', padding: '12px 22px', borderRadius: 'var(--r-pill)',
+          fontWeight: 700, fontSize: 13.5, boxShadow: 'var(--shadow-dark)', zIndex: 1100,
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <Icon.Check size={15} />{toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
