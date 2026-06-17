@@ -434,7 +434,6 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
 })();
 
 </script>
-
 <script>
 const {
   useState,
@@ -467,7 +466,7 @@ const TIPO_DESC = {
 const VERTICALES = {
   B2B: ['Cold emails', 'Eventos', 'Hunting', 'Referral', 'Paid Media'],
   B2B2C: ['Cold emails', 'Eventos', 'Hunting', 'Referral', 'Paid Media'],
-  // origen del PRESTADOR
+  // vertical del PRESTADOR (heredada, no se elige a mano)
   B2C: ['Organic', 'Paid Media', 'Newsletter', 'Cold email']
 };
 
@@ -486,7 +485,6 @@ const ETAPA_CIERRE = {
 };
 
 // Pares de etapas consecutivas para las que se reportan tasas de conversión
-// (definidos explícitamente según el brief, en vez de inferir todos los pares)
 const PARES_CONVERSION = {
   B2B: [['Nuevo contacto', 'Reunión 1'], ['Reunión 1', 'Integración Exitosa']],
   B2B2C: [['Formulario Onboarding', 'Esquema asegurador'], ['Esquema asegurador', 'Medio de pago']],
@@ -517,6 +515,11 @@ const TIPO_COLOR = {
   }
 };
 const MOTIVOS_PERDIDA = ['Precio / fee', 'Eligió competencia', 'Sin respuesta / se enfrió', 'No cumple requisitos (isapre/prestador)', 'Timing no es ahora', 'Otro'];
+
+// Nombres de etapa válidos para upload masivo (incluye "Perdido" como estado especial)
+function etapasValidasParaUpload(tipo) {
+  return [...ETAPAS[tipo], 'Perdido'];
+}
 
 /* ============================================================
    2. UTILIDADES DE FECHA Y FORMATO
@@ -556,7 +559,7 @@ function formatDateShort(iso) {
   });
 }
 function monthKey(iso) {
-  return iso ? iso.slice(0, 7) : null; // YYYY-MM
+  return iso ? iso.slice(0, 7) : null;
 }
 function quarterKey(iso) {
   if (!iso) return null;
@@ -588,18 +591,22 @@ function fmtPct1(v) {
   if (v === null || v === undefined || isNaN(v)) return '—';
   return v.toFixed(1) + '%';
 }
+function normalizar(s) {
+  return (s || '').toString().trim().toLowerCase();
+}
 
 /* ============================================================
    3. PERSISTENCIA — localStorage
    ============================================================ */
 
-const STORAGE_KEY = 'skip_crm_data_v1';
+const STORAGE_KEY = 'skip_crm_data_v2';
 function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.leads)) return null;
+    if (!Array.isArray(parsed.prestadores)) parsed.prestadores = [];
     return parsed;
   } catch (e) {
     console.error('Error leyendo localStorage', e);
@@ -629,6 +636,38 @@ function alcanzoEtapa(lead, etapaNombre) {
 }
 function fechaEnEtapa(lead, etapaNombre) {
   return lead.stageDates && lead.stageDates[etapaNombre] || null;
+}
+
+/* ============================================================
+   4b. CATÁLOGO DE PRESTADORES — nombre → vertical (heredada por B2B2C)
+   ============================================================ */
+
+function buildSeedPrestadores() {
+  return [{
+    id: uid(),
+    nombre: 'Clínica Vespucio',
+    vertical: 'Referral'
+  }, {
+    id: uid(),
+    nombre: 'Centro Médico Andes',
+    vertical: 'Cold emails'
+  }, {
+    id: uid(),
+    nombre: 'Red Salud Maipú',
+    vertical: 'Hunting'
+  }, {
+    id: uid(),
+    nombre: 'Clínica del Mar',
+    vertical: 'Eventos'
+  }, {
+    id: uid(),
+    nombre: 'Dental Sonrisa',
+    vertical: 'Paid Media'
+  }];
+}
+function buscarPrestadorPorNombre(prestadores, nombre) {
+  const n = normalizar(nombre);
+  return prestadores.find(p => normalizar(p.nombre) === n) || null;
 }
 
 /* ============================================================
@@ -831,7 +870,8 @@ function buildSeed() {
   });
   return {
     leads,
-    version: 1
+    prestadores: buildSeedPrestadores(),
+    version: 2
   };
 }
 
@@ -839,19 +879,10 @@ function buildSeed() {
    6. MOTOR DE MÉTRICAS
    ============================================================ */
 
-// Filtra leads por periodo según una key (mes/trimestre/año) aplicada
-// sobre fechaCreacion (para conteos de generación) — se documenta cada uso.
 function leadsDeTipo(leads, tipo) {
   return leads.filter(l => l.tipo === tipo);
 }
-
-// Tasa de conversión entre un par de etapas consecutivas, sobre un set de leads dado.
-// Numerador: leads que alcanzaron etapaB (o están más adelante, o ganaron).
-// Denominador: leads que alcanzaron etapaA.
 function tasaConversion(leadsSet, tipo, etapaA, etapaB) {
-  const etapas = ETAPAS[tipo];
-  const idxA = etapas.indexOf(etapaA);
-  const idxB = etapas.indexOf(etapaB);
   const base = leadsSet.filter(l => l.tipo === tipo && alcanzoEtapa(l, etapaA));
   const avanzaron = base.filter(l => alcanzoEtapa(l, etapaB));
   return {
@@ -860,8 +891,6 @@ function tasaConversion(leadsSet, tipo, etapaA, etapaB) {
     tasa: pct(avanzaron.length, base.length)
   };
 }
-
-// Ciclo de venta promedio (días) para leads GANADOS dentro de un set
 function cicloVentaPromedio(leadsSet) {
   const ganados = leadsSet.filter(l => l.estado === ESTADOS.GANADO && l.fechaCierre);
   if (ganados.length === 0) return null;
@@ -879,8 +908,6 @@ function tasaCierreGlobal(leadsSet, tipo) {
     tasa: pct(ganados, total)
   };
 }
-
-// Construye filas de funnel completas (todas las etapas) con conteos absolutos
 function funnelCounts(leadsSet, tipo) {
   const etapas = ETAPAS[tipo];
   return etapas.map(etapa => ({
@@ -888,8 +915,6 @@ function funnelCounts(leadsSet, tipo) {
     count: leadsSet.filter(l => l.tipo === tipo && alcanzoEtapa(l, etapa)).length
   }));
 }
-
-// Agrupa leads por periodo (mes/trimestre/año) usando una función de key sobre una fecha dada
 function agruparPorPeriodo(leadsSet, keyFn, fechaField) {
   const groups = {};
   leadsSet.forEach(l => {
@@ -1203,6 +1228,48 @@ const Icon = {
     r: "4"
   }), /*#__PURE__*/React.createElement("path", {
     d: "M4 20c0-3.6 3.4-6 8-6s8 2.4 8 6"
+  })),
+  Upload: p => /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: p.size || 18,
+    height: p.size || 18,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
+  })),
+  File: p => /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: p.size || 16,
+    height: p.size || 16,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M14 3v5h5"
+  })),
+  Edit: p => /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: p.size || 14,
+    height: p.size || 14,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M12 20h9"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"
   }))
 };
 
@@ -1499,7 +1566,7 @@ function EmptyState({
 }
 
 /* ============================================================
-   9. FUNNEL VISUAL — barras horizontales con conteo y tasa entre etapas
+   9. FUNNEL VISUAL
    ============================================================ */
 
 function FunnelChart({
@@ -1618,7 +1685,7 @@ function ConversionRatesRow({
 }
 
 /* ============================================================
-   10. COMPARATIVA TEMPORAL — tasas de cierre por modelo, por periodo
+   10. COMPARATIVA TEMPORAL
    ============================================================ */
 
 function ComparativaTemporal({
@@ -1626,10 +1693,6 @@ function ComparativaTemporal({
 }) {
   const [periodo, setPeriodo] = useState('mensual');
   const keyFn = periodKeyFn(periodo);
-
-  // Agrupamos por la fecha de creación del lead (cohorte de generación),
-  // y dentro de cada cohorte calculamos cuántos de esos leads cerraron (ganaron).
-  // Esto refleja "de los leads que entraron en este periodo, qué % cerró".
   const tablaPorTipo = useMemo(() => {
     const out = {};
     Object.values(TIPOS).forEach(tipo => {
@@ -1638,13 +1701,9 @@ function ComparativaTemporal({
       const rows = {};
       Object.entries(groups).forEach(([key, arr]) => {
         const ganados = arr.filter(l => l.estado === ESTADOS.GANADO).length;
-        const perdidos = arr.filter(l => l.estado === ESTADOS.PERDIDO).length;
-        const abiertos = arr.filter(l => l.estado === ESTADOS.ABIERTO).length;
         rows[key] = {
           total: arr.length,
           ganados,
-          perdidos,
-          abiertos,
           tasa: pct(ganados, arr.length)
         };
       });
@@ -1766,406 +1825,9 @@ const tdStyle = {
 };
 
 /* ============================================================
-   12. MODAL
+   11. DASHBOARD
    ============================================================ */
 
-function Modal({
-  open,
-  onClose,
-  children,
-  width = 560,
-  title
-}) {
-  if (!open) return null;
-  return /*#__PURE__*/React.createElement("div", {
-    onClick: onClose,
-    style: {
-      position: 'fixed',
-      inset: 0,
-      background: 'rgba(28,5,48,0.45)',
-      backdropFilter: 'blur(2px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-      padding: 20
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    onClick: e => e.stopPropagation(),
-    style: {
-      background: 'var(--bg-canvas)',
-      borderRadius: 'var(--r-xl)',
-      width: '100%',
-      maxWidth: width,
-      maxHeight: '88vh',
-      overflowY: 'auto',
-      boxShadow: 'var(--shadow-lg)'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      padding: '20px 24px',
-      borderBottom: '1px solid var(--border-soft)',
-      position: 'sticky',
-      top: 0,
-      background: 'var(--bg-canvas)',
-      borderRadius: 'var(--r-xl) var(--r-xl) 0 0',
-      zIndex: 1
-    }
-  }, /*#__PURE__*/React.createElement("h3", {
-    style: {
-      fontSize: 17
-    }
-  }, title), /*#__PURE__*/React.createElement("button", {
-    onClick: onClose,
-    style: {
-      background: 'var(--bg-sunken)',
-      border: 'none',
-      borderRadius: '50%',
-      width: 32,
-      height: 32,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      color: 'var(--ink-700)'
-    }
-  }, /*#__PURE__*/React.createElement(Icon.Close, {
-    size: 15
-  }))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: 24
-    }
-  }, children)));
-}
-
-/* ============================================================
-   13. CAMPOS DE FORMULARIO
-   ============================================================ */
-
-function Field({
-  label,
-  children,
-  required,
-  hint
-}) {
-  return /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 16
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'block',
-      fontSize: 13,
-      fontWeight: 700,
-      color: 'var(--ink-700)',
-      marginBottom: 7
-    }
-  }, label, " ", required && /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: 'var(--state-danger)'
-    }
-  }, "*")), children, hint && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: 'var(--ink-500)',
-      marginTop: 5
-    }
-  }, hint));
-}
-const inputStyle = {
-  width: '100%',
-  padding: '11px 14px',
-  borderRadius: 'var(--r-md)',
-  border: '1.5px solid var(--border-strong)',
-  fontSize: 14,
-  fontFamily: 'var(--font-body)',
-  color: 'var(--ink-900)',
-  background: 'var(--bg-canvas)',
-  transition: 'border-color var(--transition)'
-};
-function TextInput(props) {
-  return /*#__PURE__*/React.createElement("input", {
-    ...props,
-    style: {
-      ...inputStyle,
-      ...(props.style || {})
-    },
-    onFocus: e => e.target.style.borderColor = 'var(--skip-cyan)',
-    onBlur: e => e.target.style.borderColor = 'var(--border-strong)'
-  });
-}
-function Select({
-  value,
-  onChange,
-  options,
-  placeholder
-}) {
-  return /*#__PURE__*/React.createElement("select", {
-    value: value || '',
-    onChange: e => onChange(e.target.value),
-    style: {
-      ...inputStyle,
-      appearance: 'none',
-      cursor: 'pointer'
-    }
-  }, /*#__PURE__*/React.createElement("option", {
-    value: "",
-    disabled: true
-  }, placeholder || 'Selecciona...'), options.map(o => /*#__PURE__*/React.createElement("option", {
-    key: o,
-    value: o
-  }, o)));
-}
-
-/* ============================================================
-   14. FORMULARIO DE LEAD (crear / editar)
-   ============================================================ */
-
-function emptyLeadForTipo(tipo) {
-  const base = {
-    tipo,
-    fechaCreacion: todayISO(),
-    etapaIndex: 0,
-    estado: ESTADOS.ABIERTO,
-    fechaCierre: null,
-    motivoPerdida: null,
-    notas: ''
-  };
-  if (tipo === 'B2B') return {
-    ...base,
-    empresa: '',
-    contacto: '',
-    email: '',
-    vertical: '',
-    stageDates: {}
-  };
-  if (tipo === 'B2B2C') return {
-    ...base,
-    nombre: '',
-    email: '',
-    celular: '',
-    prestador: '',
-    verticalPrestador: '',
-    stageDates: {}
-  };
-  return {
-    ...base,
-    nombre: '',
-    email: '',
-    celular: '',
-    vertical: '',
-    stageDates: {}
-  };
-}
-function LeadForm({
-  initial,
-  onSave,
-  onCancel
-}) {
-  const [tipo, setTipo] = useState(initial ? initial.tipo : 'B2B');
-  const [form, setForm] = useState(initial ? {
-    ...initial
-  } : emptyLeadForTipo('B2B'));
-  const isEdit = !!initial;
-  useEffect(() => {
-    if (!isEdit) setForm(emptyLeadForTipo(tipo));
-  }, [tipo]);
-  const set = (k, v) => setForm(f => ({
-    ...f,
-    [k]: v
-  }));
-  const camposValidos = () => {
-    if (!form.fechaCreacion) return false;
-    if (tipo === 'B2B') return form.empresa && form.contacto && form.email && form.vertical;
-    if (tipo === 'B2B2C') return form.nombre && form.email && form.celular && form.prestador && form.verticalPrestador;
-    return form.nombre && form.email && form.celular && form.vertical;
-  };
-  const handleSubmit = e => {
-    e.preventDefault();
-    if (!camposValidos()) return;
-    const stageDates = {
-      ...(form.stageDates || {})
-    };
-    const primeraEtapa = ETAPAS[tipo][0];
-    if (!stageDates[primeraEtapa]) stageDates[primeraEtapa] = form.fechaCreacion;
-    onSave({
-      ...form,
-      tipo,
-      stageDates,
-      id: form.id || uid()
-    });
-  };
-  return /*#__PURE__*/React.createElement("form", {
-    onSubmit: handleSubmit
-  }, !isEdit && /*#__PURE__*/React.createElement(Field, {
-    label: "Tipo de cliente",
-    required: true
-  }, /*#__PURE__*/React.createElement(SegmentedControl, {
-    value: tipo,
-    onChange: setTipo,
-    options: Object.values(TIPOS).map(t => ({
-      value: t,
-      label: t
-    }))
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12.5,
-      color: 'var(--ink-500)',
-      marginTop: 8
-    }
-  }, TIPO_DESC[tipo])), tipo === 'B2B' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Field, {
-    label: "Nombre empresa",
-    required: true
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    value: form.empresa,
-    onChange: e => set('empresa', e.target.value),
-    placeholder: "Ej: Clínica Vespucio",
-    required: true
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Nombre contacto",
-    required: true
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    value: form.contacto,
-    onChange: e => set('contacto', e.target.value),
-    placeholder: "Ej: Marcela Reyes",
-    required: true
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Correo",
-    required: true
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    type: "email",
-    value: form.email,
-    onChange: e => set('email', e.target.value),
-    placeholder: "nombre@empresa.cl",
-    required: true
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Origen / vertical",
-    required: true
-  }, /*#__PURE__*/React.createElement(Select, {
-    value: form.vertical,
-    onChange: v => set('vertical', v),
-    options: VERTICALES.B2B,
-    placeholder: "¿Cómo llegó este contacto?"
-  }))), tipo === 'B2B2C' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Field, {
-    label: "Nombre",
-    required: true
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    value: form.nombre,
-    onChange: e => set('nombre', e.target.value),
-    placeholder: "Nombre completo del paciente",
-    required: true
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Correo",
-    required: true
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    type: "email",
-    value: form.email,
-    onChange: e => set('email', e.target.value),
-    placeholder: "correo@ejemplo.com",
-    required: true
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Celular",
-    required: true
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    value: form.celular,
-    onChange: e => set('celular', e.target.value),
-    placeholder: "+56 9 0000 0000",
-    required: true
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: 14
-    }
-  }, /*#__PURE__*/React.createElement(Field, {
-    label: "Nombre del prestador",
-    required: true,
-    hint: "Origen: prestador"
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    value: form.prestador,
-    onChange: e => set('prestador', e.target.value),
-    placeholder: "Ej: Clínica Vespucio",
-    required: true
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Vertical del prestador",
-    required: true,
-    hint: "Origen: vertical"
-  }, /*#__PURE__*/React.createElement(Select, {
-    value: form.verticalPrestador,
-    onChange: v => set('verticalPrestador', v),
-    options: VERTICALES.B2B2C,
-    placeholder: "Selecciona..."
-  })))), tipo === 'B2C' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Field, {
-    label: "Nombre",
-    required: true
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    value: form.nombre,
-    onChange: e => set('nombre', e.target.value),
-    placeholder: "Nombre completo",
-    required: true
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Correo",
-    required: true
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    type: "email",
-    value: form.email,
-    onChange: e => set('email', e.target.value),
-    placeholder: "correo@ejemplo.com",
-    required: true
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Celular",
-    required: true
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    value: form.celular,
-    onChange: e => set('celular', e.target.value),
-    placeholder: "+56 9 0000 0000",
-    required: true
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Origen / vertical",
-    required: true
-  }, /*#__PURE__*/React.createElement(Select, {
-    value: form.vertical,
-    onChange: v => set('vertical', v),
-    options: VERTICALES.B2C,
-    placeholder: "¿Cómo llegó este lead?"
-  }))), /*#__PURE__*/React.createElement(Field, {
-    label: "Fecha de creación del lead",
-    required: true,
-    hint: "Se usa para calcular el ciclo de venta y las comparativas por periodo."
-  }, /*#__PURE__*/React.createElement(TextInput, {
-    type: "date",
-    value: form.fechaCreacion,
-    onChange: e => set('fechaCreacion', e.target.value),
-    required: true
-  })), isEdit && /*#__PURE__*/React.createElement(Field, {
-    label: "Notas internas"
-  }, /*#__PURE__*/React.createElement("textarea", {
-    value: form.notas || '',
-    onChange: e => set('notas', e.target.value),
-    rows: 3,
-    style: {
-      ...inputStyle,
-      resize: 'vertical',
-      fontFamily: 'var(--font-body)'
-    },
-    placeholder: "Contexto, próximos pasos, objeciones..."
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: 10,
-      marginTop: 22,
-      justifyContent: 'flex-end'
-    }
-  }, /*#__PURE__*/React.createElement(Btn, {
-    variant: "ghost",
-    onClick: onCancel
-  }, "Cancelar"), /*#__PURE__*/React.createElement(Btn, {
-    type: "submit",
-    disabled: !camposValidos()
-  }, isEdit ? 'Guardar cambios' : 'Crear lead')));
-}
 function Dashboard({
   leads,
   onGoTipo,
@@ -2306,6 +1968,428 @@ function Dashboard({
       tipo: tipo
     }))));
   })));
+}
+
+/* ============================================================
+   12. MODAL
+   ============================================================ */
+
+function Modal({
+  open,
+  onClose,
+  children,
+  width = 560,
+  title
+}) {
+  if (!open) return null;
+  return /*#__PURE__*/React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(28,5,48,0.45)',
+      backdropFilter: 'blur(2px)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+      padding: 20
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: 'var(--bg-canvas)',
+      borderRadius: 'var(--r-xl)',
+      width: '100%',
+      maxWidth: width,
+      maxHeight: '88vh',
+      overflowY: 'auto',
+      boxShadow: 'var(--shadow-lg)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '20px 24px',
+      borderBottom: '1px solid var(--border-soft)',
+      position: 'sticky',
+      top: 0,
+      background: 'var(--bg-canvas)',
+      borderRadius: 'var(--r-xl) var(--r-xl) 0 0',
+      zIndex: 1
+    }
+  }, /*#__PURE__*/React.createElement("h3", {
+    style: {
+      fontSize: 17
+    }
+  }, title), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      background: 'var(--bg-sunken)',
+      border: 'none',
+      borderRadius: '50%',
+      width: 32,
+      height: 32,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'var(--ink-700)'
+    }
+  }, /*#__PURE__*/React.createElement(Icon.Close, {
+    size: 15
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: 24
+    }
+  }, children)));
+}
+
+/* ============================================================
+   13. CAMPOS DE FORMULARIO
+   ============================================================ */
+
+function Field({
+  label,
+  children,
+  required,
+  hint
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: 'block',
+      fontSize: 13,
+      fontWeight: 700,
+      color: 'var(--ink-700)',
+      marginBottom: 7
+    }
+  }, label, " ", required && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--state-danger)'
+    }
+  }, "*")), children, hint && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--ink-500)',
+      marginTop: 5
+    }
+  }, hint));
+}
+const inputStyle = {
+  width: '100%',
+  padding: '11px 14px',
+  borderRadius: 'var(--r-md)',
+  border: '1.5px solid var(--border-strong)',
+  fontSize: 14,
+  fontFamily: 'var(--font-body)',
+  color: 'var(--ink-900)',
+  background: 'var(--bg-canvas)',
+  transition: 'border-color var(--transition)'
+};
+function TextInput(props) {
+  return /*#__PURE__*/React.createElement("input", {
+    ...props,
+    style: {
+      ...inputStyle,
+      ...(props.style || {})
+    },
+    onFocus: e => e.target.style.borderColor = 'var(--skip-cyan)',
+    onBlur: e => e.target.style.borderColor = 'var(--border-strong)'
+  });
+}
+function Select({
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled
+}) {
+  return /*#__PURE__*/React.createElement("select", {
+    value: value || '',
+    onChange: e => onChange(e.target.value),
+    disabled: disabled,
+    style: {
+      ...inputStyle,
+      appearance: 'none',
+      cursor: disabled ? 'not-allowed' : 'pointer',
+      opacity: disabled ? 0.6 : 1
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "",
+    disabled: true
+  }, placeholder || 'Selecciona...'), options.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o,
+    value: o
+  }, o)));
+}
+
+/* ============================================================
+   14. FORMULARIO DE LEAD (crear / editar)
+   ============================================================ */
+
+function emptyLeadForTipo(tipo) {
+  const base = {
+    tipo,
+    fechaCreacion: todayISO(),
+    etapaIndex: 0,
+    estado: ESTADOS.ABIERTO,
+    fechaCierre: null,
+    motivoPerdida: null,
+    notas: ''
+  };
+  if (tipo === 'B2B') return {
+    ...base,
+    empresa: '',
+    contacto: '',
+    email: '',
+    vertical: '',
+    stageDates: {}
+  };
+  if (tipo === 'B2B2C') return {
+    ...base,
+    nombre: '',
+    email: '',
+    celular: '',
+    prestador: '',
+    verticalPrestador: '',
+    stageDates: {}
+  };
+  return {
+    ...base,
+    nombre: '',
+    email: '',
+    celular: '',
+    vertical: '',
+    stageDates: {}
+  };
+}
+function LeadForm({
+  initial,
+  onSave,
+  onCancel,
+  prestadores
+}) {
+  const [tipo, setTipo] = useState(initial ? initial.tipo : 'B2B');
+  const [form, setForm] = useState(initial ? {
+    ...initial
+  } : emptyLeadForTipo('B2B'));
+  const isEdit = !!initial;
+  useEffect(() => {
+    if (!isEdit) setForm(emptyLeadForTipo(tipo));
+  }, [tipo]);
+  const set = (k, v) => setForm(f => ({
+    ...f,
+    [k]: v
+  }));
+
+  // B2B2C: al elegir un prestador, la vertical se hereda automáticamente y queda fija (no editable)
+  const handlePrestadorChange = nombrePrestador => {
+    const prestador = buscarPrestadorPorNombre(prestadores, nombrePrestador);
+    setForm(f => ({
+      ...f,
+      prestador: nombrePrestador,
+      verticalPrestador: prestador ? prestador.vertical : ''
+    }));
+  };
+  const camposValidos = () => {
+    if (!form.fechaCreacion) return false;
+    if (tipo === 'B2B') return form.empresa && form.contacto && form.email && form.vertical;
+    if (tipo === 'B2B2C') return form.nombre && form.email && form.celular && form.prestador && form.verticalPrestador;
+    return form.nombre && form.email && form.celular && form.vertical;
+  };
+  const handleSubmit = e => {
+    e.preventDefault();
+    if (!camposValidos()) return;
+    const stageDates = {
+      ...(form.stageDates || {})
+    };
+    const primeraEtapa = ETAPAS[tipo][0];
+    if (!stageDates[primeraEtapa]) stageDates[primeraEtapa] = form.fechaCreacion;
+    onSave({
+      ...form,
+      tipo,
+      stageDates,
+      id: form.id || uid()
+    });
+  };
+  const sinPrestadores = prestadores.length === 0;
+  return /*#__PURE__*/React.createElement("form", {
+    onSubmit: handleSubmit
+  }, !isEdit && /*#__PURE__*/React.createElement(Field, {
+    label: "Tipo de cliente",
+    required: true
+  }, /*#__PURE__*/React.createElement(SegmentedControl, {
+    value: tipo,
+    onChange: setTipo,
+    options: Object.values(TIPOS).map(t => ({
+      value: t,
+      label: t
+    }))
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: 'var(--ink-500)',
+      marginTop: 8
+    }
+  }, TIPO_DESC[tipo])), tipo === 'B2B' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Field, {
+    label: "Nombre empresa",
+    required: true
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    value: form.empresa,
+    onChange: e => set('empresa', e.target.value),
+    placeholder: "Ej: Clínica Vespucio",
+    required: true
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Nombre contacto",
+    required: true
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    value: form.contacto,
+    onChange: e => set('contacto', e.target.value),
+    placeholder: "Ej: Marcela Reyes",
+    required: true
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Correo",
+    required: true
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    type: "email",
+    value: form.email,
+    onChange: e => set('email', e.target.value),
+    placeholder: "nombre@empresa.cl",
+    required: true
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Origen / vertical",
+    required: true
+  }, /*#__PURE__*/React.createElement(Select, {
+    value: form.vertical,
+    onChange: v => set('vertical', v),
+    options: VERTICALES.B2B,
+    placeholder: "¿Cómo llegó este contacto?"
+  }))), tipo === 'B2B2C' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Field, {
+    label: "Nombre",
+    required: true
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    value: form.nombre,
+    onChange: e => set('nombre', e.target.value),
+    placeholder: "Nombre completo del paciente",
+    required: true
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Correo",
+    required: true
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    type: "email",
+    value: form.email,
+    onChange: e => set('email', e.target.value),
+    placeholder: "correo@ejemplo.com",
+    required: true
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Celular",
+    required: true
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    value: form.celular,
+    onChange: e => set('celular', e.target.value),
+    placeholder: "+56 9 0000 0000",
+    required: true
+  })), sinPrestadores ? /*#__PURE__*/React.createElement(Field, {
+    label: "Prestador",
+    required: true,
+    hint: "No hay prestadores en el catálogo todavía. Agrega uno en la sección 'Prestadores' antes de crear este lead."
+  }, /*#__PURE__*/React.createElement(Select, {
+    value: "",
+    onChange: () => {},
+    options: [],
+    placeholder: "Sin prestadores disponibles",
+    disabled: true
+  })) : /*#__PURE__*/React.createElement(Field, {
+    label: "Prestador",
+    required: true,
+    hint: "La vertical se hereda automáticamente del prestador elegido."
+  }, /*#__PURE__*/React.createElement(Select, {
+    value: form.prestador,
+    onChange: handlePrestadorChange,
+    options: prestadores.map(p => p.nombre),
+    placeholder: "Selecciona el prestador..."
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Vertical (heredada del prestador)"
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    value: form.verticalPrestador || '—',
+    disabled: true,
+    style: {
+      background: 'var(--bg-sunken)',
+      color: 'var(--ink-500)',
+      cursor: 'not-allowed'
+    }
+  }))), tipo === 'B2C' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Field, {
+    label: "Nombre",
+    required: true
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    value: form.nombre,
+    onChange: e => set('nombre', e.target.value),
+    placeholder: "Nombre completo",
+    required: true
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Correo",
+    required: true
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    type: "email",
+    value: form.email,
+    onChange: e => set('email', e.target.value),
+    placeholder: "correo@ejemplo.com",
+    required: true
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Celular",
+    required: true
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    value: form.celular,
+    onChange: e => set('celular', e.target.value),
+    placeholder: "+56 9 0000 0000",
+    required: true
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Origen / vertical",
+    required: true
+  }, /*#__PURE__*/React.createElement(Select, {
+    value: form.vertical,
+    onChange: v => set('vertical', v),
+    options: VERTICALES.B2C,
+    placeholder: "¿Cómo llegó este lead?"
+  }))), /*#__PURE__*/React.createElement(Field, {
+    label: "Fecha de creación del lead",
+    required: true,
+    hint: "Se usa para calcular el ciclo de venta y las comparativas por periodo."
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    type: "date",
+    value: form.fechaCreacion,
+    onChange: e => set('fechaCreacion', e.target.value),
+    required: true
+  })), isEdit && /*#__PURE__*/React.createElement(Field, {
+    label: "Notas internas"
+  }, /*#__PURE__*/React.createElement("textarea", {
+    value: form.notas || '',
+    onChange: e => set('notas', e.target.value),
+    rows: 3,
+    style: {
+      ...inputStyle,
+      resize: 'vertical',
+      fontFamily: 'var(--font-body)'
+    },
+    placeholder: "Contexto, próximos pasos, objeciones..."
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      marginTop: 22,
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    variant: "ghost",
+    onClick: onCancel
+  }, "Cancelar"), /*#__PURE__*/React.createElement(Btn, {
+    type: "submit",
+    disabled: !camposValidos()
+  }, isEdit ? 'Guardar cambios' : 'Crear lead')));
 }
 
 /* ============================================================
@@ -2930,7 +3014,752 @@ function LeadDetail({
 }
 
 /* ============================================================
-   17. EXPORTAR / IMPORTAR — respaldo manual entre los dos usuarios del piloto
+   17. CATÁLOGO DE PRESTADORES — nombre → vertical, editable a mano
+   Resuelve que los leads B2B2C hereden la vertical de su prestador
+   en vez de tener que elegirla manualmente.
+   ============================================================ */
+
+function PrestadoresView({
+  prestadores,
+  leads,
+  onAdd,
+  onUpdate,
+  onDelete
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [nombre, setNombre] = useState('');
+  const [vertical, setVertical] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const abrirNuevo = () => {
+    setEditing(null);
+    setNombre('');
+    setVertical('');
+    setErrorMsg('');
+    setShowForm(true);
+  };
+  const abrirEditar = p => {
+    setEditing(p);
+    setNombre(p.nombre);
+    setVertical(p.vertical);
+    setErrorMsg('');
+    setShowForm(true);
+  };
+  const contarLeadsDePrestador = nombrePrestador => leads.filter(l => l.tipo === 'B2B2C' && normalizar(l.prestador) === normalizar(nombrePrestador)).length;
+  const guardar = () => {
+    if (!nombre.trim() || !vertical) {
+      setErrorMsg('Completa nombre y vertical.');
+      return;
+    }
+    const duplicado = prestadores.find(p => normalizar(p.nombre) === normalizar(nombre) && p.id !== (editing && editing.id));
+    if (duplicado) {
+      setErrorMsg('Ya existe un prestador con ese nombre.');
+      return;
+    }
+    if (editing) {
+      onUpdate({
+        ...editing,
+        nombre: nombre.trim(),
+        vertical
+      });
+    } else {
+      onAdd({
+        id: uid(),
+        nombre: nombre.trim(),
+        vertical
+      });
+    }
+    setShowForm(false);
+  };
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-end',
+      marginBottom: 18,
+      flexWrap: 'wrap',
+      gap: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontSize: 23
+    }
+  }, "Prestadores"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: 'var(--ink-500)',
+      margin: '6px 0 0',
+      fontWeight: 500
+    }
+  }, "Cada prestador pertenece a una sola vertical. Los leads B2B2C heredan esa vertical automáticamente al elegir su prestador.")), /*#__PURE__*/React.createElement(Btn, {
+    icon: /*#__PURE__*/React.createElement(Icon.Plus, null),
+    onClick: abrirNuevo
+  }, "Nuevo prestador")), /*#__PURE__*/React.createElement(Card, {
+    pad: 0
+  }, prestadores.length === 0 ? /*#__PURE__*/React.createElement(EmptyState, {
+    title: "Aún no hay prestadores en el catálogo",
+    desc: "Agrega los prestadores adheridos a Skip con su vertical de origen para poder asignarlos a leads B2B2C.",
+    action: /*#__PURE__*/React.createElement(Btn, {
+      icon: /*#__PURE__*/React.createElement(Icon.Plus, null),
+      onClick: abrirNuevo
+    }, "Nuevo prestador")
+  }) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      borderCollapse: 'collapse',
+      fontSize: 13.5,
+      minWidth: 480
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: thStyle
+  }, "Prestador"), /*#__PURE__*/React.createElement("th", {
+    style: thStyle
+  }, "Vertical"), /*#__PURE__*/React.createElement("th", {
+    style: thStyle
+  }, "Leads B2B2C"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      ...thStyle,
+      textAlign: 'right'
+    }
+  }, "Acciones"))), /*#__PURE__*/React.createElement("tbody", null, prestadores.map(p => /*#__PURE__*/React.createElement("tr", {
+    key: p.id
+  }, /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700
+    }
+  }, p.nombre)), /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, /*#__PURE__*/React.createElement(Pill, {
+    tone: "warning",
+    size: "sm"
+  }, p.vertical)), /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, contarLeadsDePrestador(p.nombre)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      ...tdStyle,
+      textAlign: 'right'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    variant: "ghost",
+    size: "sm",
+    icon: /*#__PURE__*/React.createElement(Icon.Edit, {
+      size: 13
+    }),
+    onClick: () => abrirEditar(p)
+  }, "Editar"), confirmDeleteId === p.id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Btn, {
+    variant: "danger",
+    size: "sm",
+    onClick: () => {
+      onDelete(p.id);
+      setConfirmDeleteId(null);
+    }
+  }, "Confirmar"), /*#__PURE__*/React.createElement(Btn, {
+    variant: "ghost",
+    size: "sm",
+    onClick: () => setConfirmDeleteId(null)
+  }, "Cancelar")) : /*#__PURE__*/React.createElement(Btn, {
+    variant: "ghost",
+    size: "sm",
+    icon: /*#__PURE__*/React.createElement(Icon.Trash, {
+      size: 13
+    }),
+    onClick: () => setConfirmDeleteId(p.id),
+    style: {
+      color: 'var(--state-danger)'
+    }
+  }, "Eliminar"))))))))), /*#__PURE__*/React.createElement(Modal, {
+    open: showForm,
+    onClose: () => setShowForm(false),
+    title: editing ? 'Editar prestador' : 'Nuevo prestador',
+    width: 440
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Nombre del prestador",
+    required: true
+  }, /*#__PURE__*/React.createElement(TextInput, {
+    value: nombre,
+    onChange: e => setNombre(e.target.value),
+    placeholder: "Ej: Clínica Vespucio"
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Vertical",
+    required: true,
+    hint: "De aquí se heredará automáticamente la vertical de todos sus leads B2B2C."
+  }, /*#__PURE__*/React.createElement(Select, {
+    value: vertical,
+    onChange: setVertical,
+    options: VERTICALES.B2B2C,
+    placeholder: "Selecciona la vertical..."
+  })), errorMsg && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: 'var(--state-danger)',
+      fontWeight: 600,
+      marginBottom: 12
+    }
+  }, errorMsg), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    variant: "ghost",
+    onClick: () => setShowForm(false)
+  }, "Cancelar"), /*#__PURE__*/React.createElement(Btn, {
+    onClick: guardar
+  }, editing ? 'Guardar cambios' : 'Crear prestador'))));
+}
+
+/* ============================================================
+   18. CARGA MASIVA CSV — parseo y upsert por email
+   B2B2C: nombre,email,celular,prestador,fechaCreacion,etapa
+   B2C:   nombre,email,celular,vertical,fechaCreacion,etapa
+   Regla: email no existe -> crea. email existe y etapa distinta -> actualiza.
+          email existe y etapa igual -> no toca nada. "Perdido" como etapa
+          marca el lead perdido (motivo se completa a mano en el CRM).
+   ============================================================ */
+
+const CAMPOS_CSV = {
+  B2B2C: ['nombre', 'email', 'celular', 'prestador', 'fechaCreacion', 'etapa'],
+  B2C: ['nombre', 'email', 'celular', 'vertical', 'fechaCreacion', 'etapa']
+};
+
+// Parser de CSV simple pero robusto: soporta comillas dobles, comas dentro de
+// campos citados, comillas escapadas (""), líneas con \r\n o \n, y BOM inicial.
+function parseCSV(text) {
+  const clean = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (clean[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += c;
+      }
+    } else {
+      if (c === '"') inQuotes = true;else if (c === ',') {
+        row.push(field);
+        field = '';
+      } else if (c === '\n') {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = '';
+      } else field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows.filter(r => r.length > 1 || r.length === 1 && r[0].trim() !== '');
+}
+function detectarSeparador(headerLine) {
+  // Soporta tanto coma como punto y coma (Excel en español suele exportar con ;)
+  const commaCount = (headerLine.match(/,/g) || []).length;
+  const semiCount = (headerLine.match(/;/g) || []).length;
+  return semiCount > commaCount ? ';' : ',';
+}
+
+// Valida y normaliza filas crudas de CSV en estructuras { ok, data, errores }
+function procesarCSV(rawText, tipo) {
+  const camposEsperados = CAMPOS_CSV[tipo];
+  const sep = detectarSeparador(rawText.split('\n')[0] || '');
+  // Si el separador detectado es ';' (típico de Excel en español), lo normalizamos a ','
+  // antes de parsear. Es una simplificación segura para estos datos (nombres, emails,
+  // fechas, nombres de etapa) que no suelen contener comas reales dentro de un campo.
+  const finalRows = sep === ';' ? parseCSV(rawText.replace(/;/g, ',')) : parseCSV(rawText);
+  if (finalRows.length === 0) {
+    return {
+      ok: false,
+      errores: ['El archivo está vacío o no se pudo leer.'],
+      data: []
+    };
+  }
+  const header = finalRows[0].map(h => normalizar(h));
+  const idxMap = {};
+  camposEsperados.forEach(campo => {
+    const idx = header.indexOf(campo.toLowerCase());
+    idxMap[campo] = idx;
+  });
+  const faltantes = camposEsperados.filter(c => idxMap[c] === -1);
+  if (faltantes.length > 0) {
+    return {
+      ok: false,
+      errores: [`Faltan columnas obligatorias: ${faltantes.join(', ')}. Columnas esperadas: ${camposEsperados.join(', ')}.`],
+      data: []
+    };
+  }
+  const etapasValidas = etapasValidasParaUpload(tipo);
+  const data = [];
+  const errores = [];
+  for (let i = 1; i < finalRows.length; i++) {
+    const r = finalRows[i];
+    if (r.every(c => (c || '').trim() === '')) continue; // fila vacía
+    const get = campo => (r[idxMap[campo]] || '').trim();
+    const nombre = get('nombre');
+    const email = get('email');
+    const celular = get('celular');
+    const fechaCreacion = get('fechaCreacion');
+    const etapaRaw = get('etapa');
+    const refTercero = tipo === 'B2B2C' ? get('prestador') : get('vertical');
+    const filaNum = i + 1;
+    let filaError = null;
+    if (!email) filaError = `Fila ${filaNum}: falta email (obligatorio para identificar al lead).`;else if (!nombre) filaError = `Fila ${filaNum}: falta nombre.`;else if (!fechaCreacion || !parseISO(fechaCreacion)) filaError = `Fila ${filaNum}: fechaCreacion inválida o ausente ("${fechaCreacion}"). Formato esperado: YYYY-MM-DD.`;else if (!refTercero) filaError = `Fila ${filaNum}: falta ${tipo === 'B2B2C' ? 'prestador' : 'vertical'}.`;else if (!etapaRaw) filaError = `Fila ${filaNum}: falta etapa.`;
+    if (!filaError) {
+      const etapaMatch = etapasValidas.find(e => normalizar(e) === normalizar(etapaRaw));
+      if (!etapaMatch) {
+        filaError = `Fila ${filaNum}: etapa "${etapaRaw}" no es válida para ${tipo}. Valores permitidos: ${etapasValidas.join(', ')}.`;
+      }
+    }
+    if (tipo === 'B2C' && !filaError) {
+      const vMatch = VERTICALES.B2C.find(v => normalizar(v) === normalizar(refTercero));
+      if (!vMatch) filaError = `Fila ${filaNum}: vertical "${refTercero}" no es válida. Valores permitidos: ${VERTICALES.B2C.join(', ')}.`;
+    }
+    if (filaError) {
+      errores.push(filaError);
+      continue;
+    }
+    const etapaMatch = etapasValidas.find(e => normalizar(e) === normalizar(etapaRaw));
+    data.push({
+      nombre,
+      email,
+      celular,
+      refTercero,
+      fechaCreacion,
+      etapa: etapaMatch
+    });
+  }
+  return {
+    ok: errores.length === 0 || data.length > 0,
+    errores,
+    data
+  };
+}
+
+// Aplica upsert: para cada fila del CSV, crea o actualiza el lead correspondiente
+// usando email como llave única. Devuelve el nuevo array de leads + un resumen.
+function aplicarUploadMasivo(leadsActuales, filasCSV, tipo, prestadores) {
+  let leads = [...leadsActuales];
+  let creados = 0,
+    actualizados = 0,
+    sinCambios = 0,
+    omitidos = 0;
+  const erroresAplicacion = [];
+  filasCSV.forEach(fila => {
+    const emailNorm = normalizar(fila.email);
+    const existenteIdx = leads.findIndex(l => l.tipo === tipo && normalizar(l.email) === emailNorm);
+    let prestadorInfo = null;
+    if (tipo === 'B2B2C') {
+      prestadorInfo = buscarPrestadorPorNombre(prestadores, fila.refTercero);
+      if (!prestadorInfo) {
+        erroresAplicacion.push(`"${fila.refTercero}" no existe en el catálogo de Prestadores (lead ${fila.email} omitido). Agrégalo primero en la sección Prestadores.`);
+        omitidos++;
+        return;
+      }
+    }
+    const etapas = ETAPAS[tipo];
+    const esPerdido = normalizar(fila.etapa) === normalizar('Perdido');
+    const etapaIndexNuevo = esPerdido ? null : etapas.indexOf(fila.etapa);
+    if (existenteIdx === -1) {
+      // Crear nuevo lead
+      const baseStageDates = {};
+      if (!esPerdido) {
+        for (let i = 0; i <= etapaIndexNuevo; i++) baseStageDates[etapas[i]] = fila.fechaCreacion;
+      } else {
+        baseStageDates[etapas[0]] = fila.fechaCreacion;
+      }
+      const nuevoLead = {
+        id: uid(),
+        tipo,
+        nombre: fila.nombre,
+        email: fila.email,
+        celular: fila.celular,
+        fechaCreacion: fila.fechaCreacion,
+        notas: '',
+        motivoPerdida: null,
+        etapaIndex: esPerdido ? 0 : etapaIndexNuevo,
+        estado: esPerdido ? ESTADOS.PERDIDO : etapaIndexNuevo === etapas.length - 1 ? ESTADOS.GANADO : ESTADOS.ABIERTO,
+        fechaCierre: esPerdido ? todayISO() : etapaIndexNuevo === etapas.length - 1 ? fila.fechaCreacion : null,
+        stageDates: baseStageDates,
+        ...(tipo === 'B2B2C' ? {
+          prestador: prestadorInfo.nombre,
+          verticalPrestador: prestadorInfo.vertical
+        } : {
+          vertical: fila.refTercero
+        })
+      };
+      leads.push(nuevoLead);
+      creados++;
+    } else {
+      const actual = leads[existenteIdx];
+      const etapaActualNombre = actual.estado === ESTADOS.PERDIDO ? 'Perdido' : etapas[actual.etapaIndex];
+      const mismaEtapa = normalizar(etapaActualNombre) === normalizar(fila.etapa);
+      if (mismaEtapa) {
+        sinCambios++;
+        return;
+      }
+      let actualizado = {
+        ...actual,
+        nombre: fila.nombre,
+        celular: fila.celular || actual.celular
+      };
+      if (tipo === 'B2B2C') {
+        actualizado.prestador = prestadorInfo.nombre;
+        actualizado.verticalPrestador = prestadorInfo.vertical;
+      } else {
+        actualizado.vertical = fila.refTercero;
+      }
+      if (esPerdido) {
+        actualizado.estado = ESTADOS.PERDIDO;
+        actualizado.fechaCierre = todayISO();
+      } else {
+        const stageDates = {
+          ...actualizado.stageDates
+        };
+        for (let i = 0; i <= etapaIndexNuevo; i++) if (!stageDates[etapas[i]]) stageDates[etapas[i]] = todayISO();
+        actualizado.etapaIndex = etapaIndexNuevo;
+        actualizado.stageDates = stageDates;
+        const esUltima = etapaIndexNuevo === etapas.length - 1;
+        actualizado.estado = esUltima ? ESTADOS.GANADO : ESTADOS.ABIERTO;
+        actualizado.fechaCierre = esUltima ? todayISO() : null;
+        if (actual.estado === ESTADOS.PERDIDO) actualizado.motivoPerdida = null; // se reabre si venía perdido
+      }
+      leads[existenteIdx] = actualizado;
+      actualizados++;
+    }
+  });
+  return {
+    leads,
+    resumen: {
+      creados,
+      actualizados,
+      sinCambios,
+      omitidos
+    },
+    erroresAplicacion
+  };
+}
+
+/* ============================================================
+   19. VISTA DE CARGA MASIVA — UI del uploader B2B2C / B2C
+   ============================================================ */
+
+function plantillaCSV(tipo) {
+  const cols = CAMPOS_CSV[tipo];
+  const ejemplo = tipo === 'B2B2C' ? ['Francisca Lagos', 'flagos@gmail.com', '+56 9 8123 4455', 'Clínica Vespucio', '2026-04-05', 'Esquema asegurador'] : ['Matías Contreras', 'mati.contreras@gmail.com', '+56 9 5512 7733', 'Organic', '2026-03-01', 'Medio de pago'];
+  const csv = [cols.join(','), ejemplo.join(',')].join('\n');
+  const blob = new Blob(['\uFEFF' + csv], {
+    type: 'text/csv;charset=utf-8;'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `plantilla-${tipo.toLowerCase()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function UploadMasivoView({
+  leads,
+  prestadores,
+  onApply
+}) {
+  const [tipo, setTipo] = useState('B2B2C');
+  const [fileName, setFileName] = useState('');
+  const [resultado, setResultado] = useState(null); // { ok, errores, data }
+  const [aplicando, setAplicando] = useState(false);
+  const fileInputRef = useRef(null);
+  const handleFile = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setFileName(file.name);
+    setResultado(null);
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const text = ev.target.result;
+      const procesado = procesarCSV(text, tipo);
+      setResultado(procesado);
+    };
+    reader.readAsText(file, 'utf-8');
+    e.target.value = '';
+  };
+  const handleAplicar = () => {
+    if (!resultado || resultado.data.length === 0) return;
+    setAplicando(true);
+    const {
+      leads: nuevosLeads,
+      resumen,
+      erroresAplicacion
+    } = aplicarUploadMasivo(leads, resultado.data, tipo, prestadores);
+    onApply(nuevosLeads);
+    setResultado(prev => ({
+      ...prev,
+      resumen,
+      erroresAplicacion,
+      aplicado: true
+    }));
+    setAplicando(false);
+  };
+  const camposEsperados = CAMPOS_CSV[tipo];
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 22
+    }
+  }, /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontSize: 23
+    }
+  }, "Carga masiva"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: 'var(--ink-500)',
+      margin: '6px 0 0',
+      fontWeight: 500
+    }
+  }, "Sube un CSV exportado desde la base de Skip para crear o actualizar leads B2B2C o B2C en lote.")), /*#__PURE__*/React.createElement(Card, {
+    style: {
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "¿Qué tipo de leads vas a cargar?",
+    required: true
+  }, /*#__PURE__*/React.createElement(SegmentedControl, {
+    value: tipo,
+    onChange: v => {
+      setTipo(v);
+      setResultado(null);
+      setFileName('');
+    },
+    options: [{
+      value: 'B2B2C',
+      label: 'B2B2C'
+    }, {
+      value: 'B2C',
+      label: 'B2C'
+    }]
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--bg-sunken)',
+      borderRadius: 'var(--r-md)',
+      padding: 16,
+      marginBottom: 18
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 700,
+      color: 'var(--ink-900)',
+      marginBottom: 6
+    }
+  }, "Columnas requeridas para ", tipo), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginBottom: 10
+    }
+  }, camposEsperados.map(c => /*#__PURE__*/React.createElement(Pill, {
+    key: c,
+    tone: "neutral",
+    size: "sm"
+  }, c))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: 'var(--ink-500)',
+      lineHeight: 1.6
+    }
+  }, /*#__PURE__*/React.createElement("strong", null, "email"), " identifica al lead — si ya existe, se actualiza; si no, se crea.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("strong", null, tipo === 'B2B2C' ? 'prestador' : 'vertical'), tipo === 'B2B2C' ? ' debe coincidir exactamente con un nombre del catálogo de Prestadores.' : ` debe ser una de: ${VERTICALES.B2C.join(', ')}.`, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("strong", null, "fechaCreacion"), " en formato AAAA-MM-DD.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("strong", null, "etapa"), " debe ser exactamente una de: ", etapasValidasParaUpload(tipo).join(', '), "."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    variant: "secondary",
+    size: "sm",
+    icon: /*#__PURE__*/React.createElement(Icon.File, {
+      size: 13
+    }),
+    onClick: () => plantillaCSV(tipo)
+  }, "Descargar plantilla ", tipo))), tipo === 'B2B2C' && prestadores.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--state-warning-bg)',
+      color: 'var(--state-warning)',
+      borderRadius: 'var(--r-md)',
+      padding: '12px 16px',
+      fontSize: 13,
+      fontWeight: 600,
+      marginBottom: 18
+    }
+  }, "No hay prestadores en el catálogo. Agrega al menos uno en la sección \"Prestadores\" antes de cargar un CSV de B2B2C."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    icon: /*#__PURE__*/React.createElement(Icon.Upload, {
+      size: 16
+    }),
+    onClick: () => fileInputRef.current.click()
+  }, "Elegir archivo CSV"), /*#__PURE__*/React.createElement("input", {
+    ref: fileInputRef,
+    type: "file",
+    accept: ".csv,text/csv",
+    onChange: handleFile,
+    style: {
+      display: 'none'
+    }
+  }), fileName && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: 'var(--ink-700)',
+      fontWeight: 600
+    }
+  }, fileName))), resultado && /*#__PURE__*/React.createElement(Card, {
+    style: {
+      marginBottom: 20
+    }
+  }, resultado.errores.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 18
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 700,
+      color: 'var(--state-danger)',
+      marginBottom: 8
+    }
+  }, resultado.errores.length, " fila", resultado.errores.length !== 1 ? 's' : '', " con problemas (no se procesarán)"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxHeight: 160,
+      overflowY: 'auto',
+      background: 'var(--state-danger-bg)',
+      borderRadius: 'var(--r-md)',
+      padding: 12
+    }
+  }, resultado.errores.map((e, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: 12.5,
+      color: 'var(--state-danger)',
+      marginBottom: 4
+    }
+  }, e)))), !resultado.aplicado ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 700,
+      color: 'var(--ink-900)',
+      marginBottom: 10
+    }
+  }, resultado.data.length, " fila", resultado.data.length !== 1 ? 's' : '', " lista", resultado.data.length !== 1 ? 's' : '', " para procesar"), resultado.data.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: 'auto',
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: {
+      width: '100%',
+      borderCollapse: 'collapse',
+      fontSize: 12.5,
+      minWidth: 560
+    }
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: thStyle
+  }, "Nombre"), /*#__PURE__*/React.createElement("th", {
+    style: thStyle
+  }, "Email"), /*#__PURE__*/React.createElement("th", {
+    style: thStyle
+  }, tipo === 'B2B2C' ? 'Prestador' : 'Vertical'), /*#__PURE__*/React.createElement("th", {
+    style: thStyle
+  }, "Etapa"))), /*#__PURE__*/React.createElement("tbody", null, resultado.data.slice(0, 8).map((f, i) => /*#__PURE__*/React.createElement("tr", {
+    key: i
+  }, /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, f.nombre), /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, f.email), /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, f.refTercero), /*#__PURE__*/React.createElement("td", {
+    style: tdStyle
+  }, f.etapa === 'Perdido' ? /*#__PURE__*/React.createElement(Pill, {
+    tone: "danger",
+    size: "sm"
+  }, "Perdido") : f.etapa))))), resultado.data.length > 8 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--ink-500)',
+      marginTop: 8
+    }
+  }, "...y ", resultado.data.length - 8, " fila(s) más.")), /*#__PURE__*/React.createElement(Btn, {
+    onClick: handleAplicar,
+    disabled: resultado.data.length === 0 || aplicando
+  }, aplicando ? 'Procesando...' : `Procesar ${resultado.data.length} lead${resultado.data.length !== 1 ? 's' : ''}`)) : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 800,
+      color: 'var(--state-success)',
+      marginBottom: 14,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement(Icon.Check, {
+    size: 16
+  }), " Carga aplicada correctamente"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 12,
+      flexWrap: 'wrap',
+      marginBottom: resultado.erroresAplicacion && resultado.erroresAplicacion.length > 0 ? 14 : 0
+    }
+  }, /*#__PURE__*/React.createElement(Pill, {
+    tone: "success"
+  }, resultado.resumen.creados, " creados"), /*#__PURE__*/React.createElement(Pill, {
+    tone: "info"
+  }, resultado.resumen.actualizados, " actualizados"), /*#__PURE__*/React.createElement(Pill, {
+    tone: "neutral"
+  }, resultado.resumen.sinCambios, " sin cambios"), resultado.resumen.omitidos > 0 && /*#__PURE__*/React.createElement(Pill, {
+    tone: "danger"
+  }, resultado.resumen.omitidos, " omitidos")), resultado.erroresAplicacion && resultado.erroresAplicacion.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--state-warning-bg)',
+      borderRadius: 'var(--r-md)',
+      padding: 12
+    }
+  }, resultado.erroresAplicacion.map((e, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: 12.5,
+      color: 'var(--state-warning)',
+      marginBottom: 4
+    }
+  }, e))))));
+}
+/* ============================================================
+   20. EXPORTAR / IMPORTAR — respaldo manual entre los dos usuarios del piloto
    ============================================================ */
 
 function exportarJSON(data) {
@@ -2989,7 +3818,7 @@ function exportarCSV(leads) {
 }
 
 /* ============================================================
-   18. SIDEBAR / NAVEGACIÓN
+   21. SIDEBAR / NAVEGACIÓN
    ============================================================ */
 
 function Sidebar({
@@ -3010,6 +3839,14 @@ function Sidebar({
     id: 'comparativa',
     label: 'Comparativa',
     icon: Icon.Compare
+  }, {
+    id: 'prestadores',
+    label: 'Prestadores',
+    icon: Icon.Building
+  }, {
+    id: 'upload',
+    label: 'Carga masiva',
+    icon: Icon.Upload
   }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3145,7 +3982,7 @@ function SkipLogoMark({
 }
 
 /* ============================================================
-   19. VISTA COMPARATIVA (dedicada, con foco en ciclo de venta)
+   22. VISTA COMPARATIVA (dedicada, con foco en ciclo de venta)
    ============================================================ */
 
 function ComparativaView({
@@ -3263,13 +4100,17 @@ function ComparativaView({
 }
 
 /* ============================================================
-   20. APP — shell principal, estado global, routing
+   23. APP — shell principal, estado global, routing
    ============================================================ */
 
 function App() {
   const [leads, setLeads] = useState(() => {
     const stored = loadData();
     return stored ? stored.leads : buildSeed().leads;
+  });
+  const [prestadores, setPrestadores] = useState(() => {
+    const stored = loadData();
+    return stored && Array.isArray(stored.prestadores) ? stored.prestadores : buildSeed().prestadores;
   });
   const [view, setView] = useState('dashboard');
   const [tipoFiltroLeads, setTipoFiltroLeads] = useState('TODOS');
@@ -3281,9 +4122,10 @@ function App() {
   useEffect(() => {
     saveData({
       leads,
-      version: 1
+      prestadores,
+      version: 2
     });
-  }, [leads]);
+  }, [leads, prestadores]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 2600);
@@ -3322,6 +4164,7 @@ function App() {
         const parsed = JSON.parse(ev.target.result);
         if (parsed && Array.isArray(parsed.leads)) {
           setLeads(parsed.leads);
+          setPrestadores(Array.isArray(parsed.prestadores) ? parsed.prestadores : []);
           setToast('Datos importados correctamente');
         } else {
           setToast('Archivo inválido: no contiene leads');
@@ -3332,6 +4175,22 @@ function App() {
     };
     reader.readAsText(file);
     e.target.value = '';
+  };
+  const handleAddPrestador = p => {
+    setPrestadores(prev => [...prev, p]);
+    setToast('Prestador agregado');
+  };
+  const handleUpdatePrestador = p => {
+    setPrestadores(prev => prev.map(x => x.id === p.id ? p : x));
+    setToast('Prestador actualizado');
+  };
+  const handleDeletePrestador = id => {
+    setPrestadores(prev => prev.filter(x => x.id !== id));
+    setToast('Prestador eliminado');
+  };
+  const handleApplyUpload = nuevosLeads => {
+    setLeads(nuevosLeads);
+    setToast('Carga masiva aplicada');
   };
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3371,7 +4230,8 @@ function App() {
     }),
     onClick: () => exportarJSON({
       leads,
-      version: 1
+      prestadores,
+      version: 2
     })
   }, "Respaldar JSON"), /*#__PURE__*/React.createElement(Btn, {
     variant: "ghost",
@@ -3399,6 +4259,16 @@ function App() {
     onNuevoLead: () => setShowNewForm(true)
   }), view === 'comparativa' && /*#__PURE__*/React.createElement(ComparativaView, {
     leads: leads
+  }), view === 'prestadores' && /*#__PURE__*/React.createElement(PrestadoresView, {
+    prestadores: prestadores,
+    leads: leads,
+    onAdd: handleAddPrestador,
+    onUpdate: handleUpdatePrestador,
+    onDelete: handleDeletePrestador
+  }), view === 'upload' && /*#__PURE__*/React.createElement(UploadMasivoView, {
+    leads: leads,
+    prestadores: prestadores,
+    onApply: handleApplyUpload
   })), /*#__PURE__*/React.createElement(Modal, {
     open: showNewForm,
     onClose: () => setShowNewForm(false),
@@ -3406,7 +4276,8 @@ function App() {
     width: 560
   }, /*#__PURE__*/React.createElement(LeadForm, {
     onSave: handleCreateLead,
-    onCancel: () => setShowNewForm(false)
+    onCancel: () => setShowNewForm(false),
+    prestadores: prestadores
   })), /*#__PURE__*/React.createElement(Modal, {
     open: !!editingLead,
     onClose: () => setEditingLead(null),
@@ -3415,7 +4286,8 @@ function App() {
   }, editingLead && /*#__PURE__*/React.createElement(LeadForm, {
     initial: editingLead,
     onSave: handleEditSave,
-    onCancel: () => setEditingLead(null)
+    onCancel: () => setEditingLead(null),
+    prestadores: prestadores
   })), /*#__PURE__*/React.createElement(Modal, {
     open: !!selectedLead && !editingLead,
     onClose: () => setSelectedLead(null),
@@ -3449,7 +4321,5 @@ function App() {
     size: 15
   }), toast));
 }
-ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));
-</script>
-</body>
-</html>
+ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));</script>
+</body></html>
